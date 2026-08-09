@@ -36,6 +36,9 @@ ingestion time — it is never silently skipped.
 The project is scaffolding only at this point; no dependencies are pinned
 yet and there is no working code to run.
 
+Start the database with `docker compose up -d db`, verify with
+`docker compose ps` that `db` is healthy.
+
 Once the backend and frontend land, the one documented command to go from a
 fresh clone to a running system will be:
 
