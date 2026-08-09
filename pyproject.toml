@@ -1,0 +1,47 @@
+[project]
+name = "pm-analyst-backend"
+version = "0.1.0"
+description = "Agentic system that ingests PM documents and produces a Feature Register"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]>=2",
+    "asyncpg",
+    "alembic",
+    "anthropic",
+    "langgraph",
+    "langgraph-checkpoint-postgres",
+    "pypdf",
+    "pdfplumber",
+    "python-docx",
+    "python-magic",
+    "watchdog",
+    "pyyaml",
+    "httpx",
+    "sse-starlette",
+    "mcp",
+    "structlog",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "testcontainers[postgres]",
+    "vcrpy",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.uv]
+package = false
