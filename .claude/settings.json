@@ -37,7 +37,8 @@
       "Bash(uvx ruff *)",
       "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" .gitignore)",
       "Bash(uv run python -c ' *)",
-      "Bash(DATABASE_URL=postgresql+asyncpg://someone:else@remote-host:5432/otherdb uv run python -c ' *)"
+      "Bash(DATABASE_URL=postgresql+asyncpg://someone:else@remote-host:5432/otherdb uv run python -c ' *)",
+      "Bash(uvx black *)"
     ],
     "additionalDirectories": [
       "/Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions"

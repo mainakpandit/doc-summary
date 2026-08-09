@@ -44,3 +44,18 @@ Ambiguous calls made during the build, logged as they happen.
   `pytest.mark.integration`; `asyncio_mode = "auto"` was added to
   `pyproject.toml`'s `[tool.pytest.ini_options]` so async tests don't each
   need an explicit `@pytest.mark.asyncio`.
+
+- **`finding_sources` has no SQLAlchemy model.** Migration 001 creates it
+  with no primary key and no unique constraint (`finding_id NOT NULL`,
+  `chunk_id` and `claim_id` both nullable, no `PRIMARY KEY` clause) — unlike
+  `claim_sources` and `register_field_sources`, which have real composite
+  keys. The model spec only calls for `Finding.sources`-style relationships
+  where one is actually needed (`Claim.sources`, `RegisterEntry.field_sources`),
+  and none was requested for findings. Mapping `finding_sources` as a
+  declarative class would require inventing a primary key that doesn't exist
+  in the migration, which would violate "match nullability from migration
+  001" in one direction or the other. Left unmapped in
+  `backend/app/models/finding.py`; write to it with SQLAlchemy Core
+  (`sqlalchemy.Table` reflection or a hand-written `Table` + `insert()`) if
+  a service ever needs to populate it. Add a composite/surrogate key to a
+  new migration first if ORM mapping becomes necessary.

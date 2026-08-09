@@ -15,6 +15,7 @@ dependencies = [
     "anthropic",
     "langgraph",
     "langgraph-checkpoint-postgres",
+    "pgvector",
     "pypdf",
     "pdfplumber",
     "python-docx",
