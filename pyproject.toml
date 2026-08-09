@@ -35,6 +35,12 @@ dev = [
     "vcrpy",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "integration: requires a live external service (e.g. Postgres); skip if unreachable",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
