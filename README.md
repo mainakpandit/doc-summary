@@ -33,23 +33,17 @@ ingestion time — it is never silently skipped.
 
 ## Setup
 
-The project is scaffolding only at this point; no dependencies are pinned
-yet and there is no working code to run.
+Run `make dev`. Open http://localhost:5173.
 
-Start the database with `docker compose up -d db`, verify with
-`docker compose ps` that `db` is healthy.
+This stands up Postgres via Docker Compose, installs Python and Node
+dependencies, runs migrations, seeds the demo corpus, and starts the
+backend and frontend dev servers. See section 5.3 of
+`IMPLEMENTATION_PLAN.md` for the exact steps that command performs.
 
-Once the backend and frontend land, the one documented command to go from a
-fresh clone to a running system will be:
-
-```
-make dev
-```
-
-This will stand up Postgres via Docker Compose, install Python and Node
-dependencies, run migrations, seed the demo corpus, and start the backend
-and frontend dev servers. See section 5.3 of `IMPLEMENTATION_PLAN.md` for
-the exact steps that command will perform.
+Other targets: `make test` runs the test suite, `make seed` reseeds the
+demo corpus, `make db-up` / `make db-down` start and stop just the
+database, and `make reset` tears down Postgres (including its volume) and
+clears `.logs/`.
 
 ## Assumptions
 
