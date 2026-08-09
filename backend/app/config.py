@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,14 +17,28 @@ class Settings(BaseSettings):
     )
 
     # Async SQLAlchemy connection string for the single Postgres instance
-    # that holds state, vectors, audit log, and LangGraph checkpoints.
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/pm_analyst"
+    # that holds state, vectors, audit log, and LangGraph checkpoints. If
+    # left unset, derived from POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB
+    # below (see _default_database_url) so the two can't drift out of sync
+    # the way they did before. Set this explicitly to point at a database
+    # that isn't the local compose container, e.g. in prod.
+    DATABASE_URL: str = ""
 
     # Credentials the docker-compose.yml `db` service uses to initialize the
-    # Postgres container. Keep these in sync with DATABASE_URL above.
+    # Postgres container. DATABASE_URL is derived from these when not set
+    # explicitly (see above).
     POSTGRES_USER: str = "pm_analyst"
     POSTGRES_PASSWORD: str = "pm_analyst"
     POSTGRES_DB: str = "pm_analyst"
+
+    @model_validator(mode="after")
+    def _default_database_url(self) -> "Settings":
+        if not self.DATABASE_URL:
+            self.DATABASE_URL = (
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@localhost:5432/{self.POSTGRES_DB}"
+            )
+        return self
 
     # Anthropic API key used by services/llm.py for every Claude call. Never
     # commit a real key; tests never require this to be set.

@@ -28,7 +28,19 @@
       "Bash(make -n reset)",
       "Bash(make -n seed)",
       "Bash(make -n db-down)",
-      "Bash(make test *)"
+      "Bash(make test *)",
+      "Bash(uv sync *)",
+      "Bash(rmdir /Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions /Users/apple/Desktop/doctask-mainak-pandit/backend/alembic 2>&1 && echo \"removed empty dirs\")",
+      "Bash(open -a Docker)",
+      "Bash(docker info *)",
+      "Bash(docker exec *)",
+      "Bash(uvx ruff *)",
+      "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" .gitignore)",
+      "Bash(uv run python -c ' *)",
+      "Bash(DATABASE_URL=postgresql+asyncpg://someone:else@remote-host:5432/otherdb uv run python -c ' *)"
+    ],
+    "additionalDirectories": [
+      "/Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions"
     ]
   }
 }

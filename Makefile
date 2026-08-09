@@ -14,7 +14,7 @@ SEED_SCRIPT := backend/scripts/seed_demo.py
 dev: db-up
 	uv sync
 	@echo "Running database migrations..."
-	@uv run alembic upgrade head || echo "WARNING: alembic upgrade head failed (expected until the Alembic init step lands) - continuing"
+	@uv run alembic upgrade head || echo "WARNING: alembic upgrade head failed - continuing"
 	@echo "Seeding demo corpus..."
 	@if [ -f $(SEED_SCRIPT) ]; then \
 		uv run python $(SEED_SCRIPT) || echo "WARNING: $(SEED_SCRIPT) failed - continuing"; \

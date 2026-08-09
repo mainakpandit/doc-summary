@@ -22,6 +22,20 @@ Ambiguous calls made during the build, logged as they happen.
   callers can't distinguish "unreachable" from "some other DB error" from the
   return value alone — only the `db_ping_failed` warning log carries that.
 
+- **`DATABASE_URL` is now derived from `POSTGRES_USER`/`POSTGRES_PASSWORD`/
+  `POSTGRES_DB` instead of being a separately hardcoded string.** Originally
+  `DATABASE_URL` defaulted to `postgres:postgres@.../pm_analyst` while
+  `docker-compose.yml` initializes the container from
+  `POSTGRES_USER=pm_analyst` (the official Postgres image only creates that
+  role, not a separate `postgres` superuser, when `POSTGRES_USER` is set) —
+  this made `alembic upgrade head` fail auth against the compose db. Rather
+  than just fixing the hardcoded value and leaving two fields that have to
+  be kept in sync by convention, `config.py` now has a
+  `_default_database_url` model validator that builds `DATABASE_URL` from
+  the `POSTGRES_*` fields whenever `DATABASE_URL` itself is left unset, so
+  they can't drift apart again. An explicit `DATABASE_URL` (env var or
+  `.env`) still wins, for pointing at a non-local database in prod.
+
 - **`test_db_ping.py` treats "can open a connection" as its own reachability
   probe, separate from `ping()`.** Since `ping()` never raises, the test
   can't use a try/except around `ping()` itself to decide skip-vs-fail, so it
