@@ -78,6 +78,7 @@ class LLMProvider(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         model: str,
+        stage: str,
     ) -> LLMResponse: ...
 
 
@@ -94,6 +95,7 @@ class AnthropicProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         model: str,
+        stage: str,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model,
@@ -171,7 +173,7 @@ async def call_claude(
     provider = _provider_factory()
 
     start = time.monotonic()
-    result = await provider.complete(system, messages, tools, model)
+    result = await provider.complete(system, messages, tools, model, stage)
     latency_ms = int((time.monotonic() - start) * 1000)
 
     usd_cost = _usd_cost(model, result.input_tokens, result.output_tokens)

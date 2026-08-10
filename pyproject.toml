@@ -30,8 +30,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "black>=26.5.1",
     "pytest",
     "pytest-asyncio",
+    "ruff>=0.16.2",
     "testcontainers[postgres]",
     "vcrpy",
 ]

@@ -45,10 +45,13 @@
       "Bash(python3 -c ' *)",
       "Bash(mkdir -p /private/tmp/claude-501/-Users-apple-Desktop-doctask-mainak-pandit/0a3d896c-f2bc-416c-bfb9-32ff0ddf9f06/scratchpad)",
       "Bash(rm -rf /Users/apple/Desktop/doctask-mainak-pandit/backend/tests/__pycache__)",
-      "Bash(env -u ANTHROPIC_API_KEY uv run pytest -q)"
+      "Bash(env -u ANTHROPIC_API_KEY uv run pytest -q)",
+      "Bash(mkdir -p /Users/apple/Desktop/doctask-mainak-pandit/backend/tests/fixtures/llm)",
+      "Bash(unset ANTHROPIC_API_KEY)"
     ],
     "additionalDirectories": [
-      "/Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions"
+      "/Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions",
+      "/Users/apple/Desktop/doctask-mainak-pandit/backend/tests/fixtures"
     ]
   }
 }

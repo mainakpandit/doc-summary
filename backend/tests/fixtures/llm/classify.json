@@ -1,0 +1,8 @@
+{
+  "classify:1aeebdb1665e4fbe589678c536c20051c64f25913a5dd1adef315a699bcd270c": {
+    "text": "{\"category\": \"meeting_notes\", \"confidence\": 0.92}",
+    "input_tokens": 118,
+    "output_tokens": 14,
+    "stop_reason": "end_turn"
+  }
+}

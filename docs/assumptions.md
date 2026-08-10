@@ -74,3 +74,34 @@ Ambiguous calls made during the build, logged as they happen.
   (`sqlalchemy.Table` reflection or a hand-written `Table` + `insert()`) if
   a service ever needs to populate it. Add a composite/surrogate key to a
   new migration first if ORM mapping becomes necessary.
+
+- **`LLMProvider.complete` now takes `stage` as a fifth argument.** The
+  Step 13 spec keys `FakeLLM`'s fixture lookup on `(stage, sha256(system +
+  json(messages)))`, but `stage` previously stopped at `call_claude` and
+  never reached `provider.complete(...)`. Threaded it through the
+  `LLMProvider` protocol and `AnthropicProvider.complete` (which accepts
+  and ignores it — the real Anthropic API has no use for it) rather than
+  giving `FakeLLM` a side channel, so the protocol stays the single
+  source of truth for what a provider implementation receives.
+
+- **`backend/app/services/embeddings.py` created early, but only as a
+  provider-factory seam.** Step 13 asks `fake_embedder` to monkeypatch
+  "the provider factories in services/llm.py and services/embeddings.py",
+  but the real embeddings service is Step 14. Added just the
+  `EmbedderProvider` protocol and a swappable `_provider_factory` (mirroring
+  `services/llm.py`'s pattern; `_default_provider` raises `NotImplementedError`
+  pointing at Step 14) so `FakeEmbedder` has something to monkeypatch now.
+  `embed_chunks`, batching, retries, and the real Voyage-backed provider are
+  unimplemented until Step 14 lands.
+
+- **Added `ruff` and `black` to the `dev` dependency group.** CLAUDE.md
+  conventions say "Python: `ruff` + `black`" and `pyproject.toml` already had
+  `[tool.ruff]`/`[tool.black]` sections, but neither was actually installed
+  (`uv run ruff` failed with "No such file or directory"), so lint had never
+  run in this repo. Installing it surfaces a pre-existing `BLE001` ("blind
+  except Exception") finding in `test_db_ping.py`'s and `test_ingestion.py`'s
+  `_db_reachable()` helpers — `test_llm_wrapper.py` repeats the same idiom
+  for its own DB-reachability check, so it now has the same finding. Left
+  all three as-is (consistent, pre-existing convention) rather than
+  special-casing the new file; a repo-wide lint cleanup is a separate task
+  from Step 13.

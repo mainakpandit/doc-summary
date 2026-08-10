@@ -1,0 +1,8 @@
+{
+  "extract:bcbece4b33279664cc76e1fa4fe4d1af3d1196e898a65325b1fe04621bf4730c": {
+    "text": "{\"claims\": [{\"text\": \"Checkout will support Apple Pay at launch.\", \"quote\": \"The checkout flow will support Apple Pay at launch.\", \"chunk_id\": \"chunk-1\"}]}",
+    "input_tokens": 96,
+    "output_tokens": 41,
+    "stop_reason": "end_turn"
+  }
+}
