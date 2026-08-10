@@ -192,3 +192,14 @@ async def embed_chunks(
         usd_cost=str(usd_cost),
         latency_ms=latency_ms,
     )
+
+
+async def embed_query(text: str) -> list[float]:
+    """Embed a single query string through the same swappable provider seam
+    as embed_chunks, for services/retrieval.py's vector search. Untimed and
+    uncosted (no cost_events row): a query embedding is orders of magnitude
+    smaller than a batch of document chunks, and retrieval has no run_id of
+    its own to attribute a cost row to."""
+    provider = _provider_factory()
+    [vector] = await provider.embed([text])
+    return vector

@@ -150,6 +150,36 @@ Ambiguous calls made during the build, logged as they happen.
   consistent with each other even though the embedding one has no ground
   truth to check against.
 
+- **Added `services.embeddings.embed_query(text) -> list[float]`, a thin
+  public wrapper around the module's private `_provider_factory`, for
+  `services/retrieval.py` to embed the search query.** `retrieval.py`
+  needs the same swappable provider seam `embed_chunks` uses (so
+  `fake_embedder`/`FakeEmbedder` cover it too), but `_provider_factory` is
+  underscore-prefixed and meant to stay private to `embeddings.py`; a
+  one-line public function is cheaper than exporting the seam itself.
+  `embed_query` does not write a `cost_events` row — unlike a chunk-embed
+  batch, a single query embedding has no `run_id` to attribute cost to (the
+  task-breakdown signature for `retrieve` is
+  `(session, corpus_id, query, k)`, with no `run_id`), and its cost is
+  negligible next to a document batch. Also, per `VoyageProvider.embed`'s
+  existing docstring, the real provider always sends
+  `input_type="document"`, even for a query — `EmbedderProvider.embed` has
+  no `input_type` parameter to plumb a `"query"` value through, and adding
+  one is out of scope for this step. Voyage's docs note `input_type` is an
+  asymmetry optimization, not a correctness requirement, so this is a
+  quality gap (slightly worse ranking), not a broken one; fix by adding
+  `input_type` to the `EmbedderProvider` protocol if retrieval quality
+  needs it later.
+
+- **`retrieval.retrieve`'s vector search filters out chunks with a NULL
+  `embedding`** (`Chunk.embedding.is_not(None)`) rather than letting them
+  sort last implicitly. Postgres's default `NULLS LAST` on ascending
+  `ORDER BY` would put them last anyway, but relying on that default was
+  worth naming explicitly — it's also what makes `test_retrieval.py`'s
+  exact-match test valid: its chunks are deliberately never embedded, so
+  the vector side is empty and the assertion is purely about the trigram
+  side of the fusion.
+
 - **`embed_chunks` retries a batch only on `httpx.TransportError`
   (connection failures, timeouts), not on any exception.** The task says
   "retries ... on network errors", not all errors; an HTTP error response
