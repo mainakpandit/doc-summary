@@ -45,6 +45,21 @@ Ambiguous calls made during the build, logged as they happen.
   `pyproject.toml`'s `[tool.pytest.ini_options]` so async tests don't each
   need an explicit `@pytest.mark.asyncio`.
 
+- **`parsers.py` MIME detection combines `python-magic` (content sniff) with
+  the file extension, letting the extension pick the parser/mime_type and
+  using the sniff only to reject a mismatch (e.g. a renamed binary).**
+  `python-magic` alone can't distinguish `.md`/`.txt`/`.csv` (all sniff as
+  `text/plain`) or tell a `.docx` from any other zip, so content-only
+  detection can't drive parser selection the way the prompt implies
+  ("Detect MIME via python-magic combined with extension"). Note also that
+  `python-magic` wraps the system `libmagic` shared library, which `uv sync`
+  does not install — a fresh clone needs `brew install libmagic` (macOS) or
+  `apt-get install libmagic1` (Debian/Ubuntu) before `make dev`/`make test`
+  will import `backend.app.services.parsers` successfully. This is a gap in
+  CLAUDE.md behavior 6 ("easy setup") worth closing (e.g. a `make dev` check
+  with a clear error) when ingestion wiring lands, not fixed here since it's
+  outside this step's scope.
+
 - **`finding_sources` has no SQLAlchemy model.** Migration 001 creates it
   with no primary key and no unique constraint (`finding_id NOT NULL`,
   `chunk_id` and `claim_id` both nullable, no `PRIMARY KEY` clause) — unlike

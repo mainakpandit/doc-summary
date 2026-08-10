@@ -38,7 +38,10 @@
       "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" .gitignore)",
       "Bash(uv run python -c ' *)",
       "Bash(DATABASE_URL=postgresql+asyncpg://someone:else@remote-host:5432/otherdb uv run python -c ' *)",
-      "Bash(uvx black *)"
+      "Bash(uvx black *)",
+      "Bash(python3 -c \"import magic\")",
+      "Bash(brew list *)",
+      "Bash(brew info *)"
     ],
     "additionalDirectories": [
       "/Users/apple/Desktop/doctask-mainak-pandit/backend/alembic/versions"
