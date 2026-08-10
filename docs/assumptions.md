@@ -189,3 +189,44 @@ Ambiguous calls made during the build, logged as they happen.
   until every batch in the call has succeeded, so a call that ultimately
   fails after retries leaves the database untouched and is safe to re-run
   in full.
+
+- **`backend/tests/conftest.py` now starts one Postgres+pgvector
+  `testcontainers` container unconditionally for every pytest session**
+  (via a `pytest_configure` hook, not a fixture), not only when
+  `integration`-marked tests are selected. `backend.app.db.engine` is a
+  module-level singleton built at import time from
+  `get_settings().DATABASE_URL`, and several existing tests
+  (`test_db_ping.py`, `test_retrieval.py`, `test_ingestion.py`,
+  `test_llm_wrapper.py`, `test_embeddings.py`) import it directly at
+  module scope — by the time any fixture could run, those imports would
+  already have bound the engine to whatever `DATABASE_URL` was live
+  before the fixture executed. Only a hook that runs before collection
+  (`pytest_configure`) can win that race, and a hook can't be scoped to
+  "only if a later-collected test needs it." Net effect: `make test` now
+  requires Docker to be running, and the full suite takes a few extra
+  seconds per session to start the container and run
+  `alembic upgrade head` against it. `pytest_unconfigure` stops the
+  container at session end.
+
+- **`db_session` uses SQLAlchemy's `join_transaction_mode="create_savepoint"`
+  recipe** (one outer transaction per test, rolled back in a `finally`;
+  each `AsyncSession` built on it gets its own SAVEPOINT) instead of a
+  plain `session.begin()` / rollback. Several services call
+  `await session.commit()` internally (`embed_chunks`, `call_claude`), and
+  a plain nested-session approach would let those inner commits end the
+  test's own transaction early, leaking rows to the next test. The
+  SAVEPOINT recipe makes an inner `commit()` release-and-reopen the
+  savepoint instead, so only the outer `connection.rollback()` in
+  `db_session`'s `finally` block actually discards anything.
+
+- **pytest config moved from `[tool.pytest.ini_options]` in
+  `pyproject.toml` to a new `pytest.ini` at the repo root**, per this
+  task's explicit instruction. Pytest only honors one of the two (whichever
+  it finds first, and `pytest.ini` wins), so the old section was deleted
+  rather than left as dead, misleading config. Coverage settings
+  (`[coverage:run]` / `[coverage:report]`) live in the same `pytest.ini`
+  file, wired in via `--cov-config=pytest.ini` in `addopts` — `coverage.py`
+  does not read `[coverage:*]` sections out of a file named `pytest.ini`
+  on its own, only from `.coveragerc` / `setup.cfg` / `tox.ini` /
+  `pyproject.toml`, so that flag is required for the sections to take
+  effect at all.
