@@ -105,3 +105,57 @@ Ambiguous calls made during the build, logged as they happen.
   all three as-is (consistent, pre-existing convention) rather than
   special-casing the new file; a repo-wide lint cleanup is a separate task
   from Step 13.
+
+- **`embed_chunks` takes an explicit `run_id: UUID` parameter, not just
+  `(session, chunk_ids)` as literally written in task_breakdown.md Step
+  14.** `cost_events.run_id` is `NOT NULL REFERENCES runs(id)` (migration
+  001), and CLAUDE.md behavior 10 requires every cost-bearing call to
+  attribute its `cost_events` row to a run. Chunks/documents carry no
+  `run_id` of their own (only `corpus_id`), so there is no way to derive
+  one from `chunk_ids` alone — the caller (an agent node, which always has
+  the current run in scope) has to supply it. Matches the existing
+  `call_claude(session, run_id, stage, ...)` shape rather than inventing a
+  side channel.
+
+- **Embedding provider is Voyage AI's `voyage-3`, called directly over its
+  REST API with `httpx` (no `voyageai` SDK added).** Anthropic has no
+  native embeddings endpoint, and `voyage-3` was already the default in
+  `config.py`/`.env.example` (`EMBEDDING_MODEL`) from an earlier step — kept
+  it rather than switching models, and hardcoded the same string as a
+  module constant in `embeddings.py` per the task's instruction, mirroring
+  `services/llm.py`'s `DEFAULT_MODEL` pattern. Used `httpx` (already a
+  dependency) instead of adding the `voyageai` package, matching
+  `AnthropicProvider`'s style of a small, direct API client rather than a
+  second dependency for a single POST endpoint.
+
+- **`VoyageProvider` does not request a specific `output_dimension` and
+  trusts `voyage-3`'s native output width matches
+  `chunks.embedding Vector(1536)` / `settings.EMBEDDING_DIM`.** `voyage-3`
+  doesn't document a configurable output dimension (unlike
+  `voyage-3-large`), so there's no request parameter to force 1536 even if
+  the model's real native width differs — that mismatch, if it exists, was
+  baked in by the earlier step that fixed `EMBEDDING_DIM=1536` and the
+  `Vector(1536)` column, not introduced here. If it turns out `voyage-3`'s
+  real output width isn't 1536, the fix is changing `EMBEDDING_MODEL` (or
+  adding a migration to resize the column), not something `embeddings.py`
+  should paper over silently.
+
+- **Embedding cost is computed from an estimated token count
+  (`len(text) // 4`), not a real usage figure from the provider.**
+  `EmbedderProvider.embed(texts) -> list[list[float]]` (as specified) has
+  no room for a usage/token-count return value, unlike
+  `LLMProvider.complete`, which returns real `input_tokens`/`output_tokens`
+  from the Anthropic API. The chars/4 heuristic mirrors `services/llm.py`'s
+  own pre-call budget estimate, so at least the two cost paths are
+  consistent with each other even though the embedding one has no ground
+  truth to check against.
+
+- **`embed_chunks` retries a batch only on `httpx.TransportError`
+  (connection failures, timeouts), not on any exception.** The task says
+  "retries ... on network errors", not all errors; an HTTP error response
+  (bad request, 401) is not transient and retrying it would just waste
+  three more calls before failing anyway, so those propagate immediately.
+  Nothing is written to the database (no `UPDATE`, no `cost_events` row)
+  until every batch in the call has succeeded, so a call that ultimately
+  fails after retries leaves the database untouched and is safe to re-run
+  in full.

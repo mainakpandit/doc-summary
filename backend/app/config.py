@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # commit a real key; tests never require this to be set.
     ANTHROPIC_API_KEY: str | None = None
 
+    # Voyage AI API key used by services/embeddings.py's VoyageProvider.
+    # Never commit a real key; tests never require this to be set (they
+    # monkeypatch the provider factory to FakeEmbedder instead).
+    VOYAGE_API_KEY: str | None = None
+
     # Embedding model used by services/embeddings.py to embed chunks and
     # queries. Must stay consistent for a given corpus's vector column.
     EMBEDDING_MODEL: str = "voyage-3"
