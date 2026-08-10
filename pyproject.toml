@@ -38,6 +38,13 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Keep one event loop for the whole session: backend.app.db.engine is a
+# module-level singleton, and its asyncpg pool binds to whichever loop
+# first uses it. Per-function loops (pytest-asyncio's default) desync the
+# pool from later tests' loops, which asyncpg reports as connection
+# failures that read (incorrectly) as "database unreachable".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 markers = [
     "integration: requires a live external service (e.g. Postgres); skip if unreachable",
 ]
