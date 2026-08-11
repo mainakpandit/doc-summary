@@ -1,8 +1,10 @@
 import { Route, Routes } from 'react-router-dom'
 import { NavBar } from '@/components/NavBar'
+import { Toaster } from '@/components/Toaster'
 import { Home } from '@/pages/Home'
 import { RunsList } from '@/pages/RunsList'
 import { RunDetail } from '@/pages/RunDetail'
+import { ReviewGate } from '@/pages/ReviewGate'
 
 function NotFound() {
   return <p className="p-6 text-sm text-muted-foreground">Page not found.</p>
@@ -18,9 +20,12 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/runs" element={<RunsList />} />
           <Route path="/runs/:id" element={<RunDetail />} />
+          <Route path="/runs/:id/review" element={<ReviewGate />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
+
+      <Toaster />
     </div>
   )
 }

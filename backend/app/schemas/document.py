@@ -19,3 +19,9 @@ class DocumentRead(BaseModel):
     mime_type: str
     doc_type: str | None
     ingested_at: datetime | None
+
+
+class DocumentTextRead(BaseModel):
+    document_id: uuid.UUID
+    filename: str
+    text: str

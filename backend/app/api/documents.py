@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_session
 from backend.app.models.corpus import Corpus
-from backend.app.schemas.document import DocumentRead
-from backend.app.services.ingestion import ingest_file, save_upload
+from backend.app.models.document import Document
+from backend.app.schemas.document import DocumentRead, DocumentTextRead
+from backend.app.services.ingestion import get_document_text, ingest_file, save_upload
 from backend.app.services.parsers import UnsupportedFormat
 
 router = APIRouter(prefix="/corpora", tags=["documents"])
@@ -41,3 +42,17 @@ async def upload_document(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return DocumentRead.model_validate(document)
+
+
+@router.get("/{corpus_id}/documents/{document_id}/text", response_model=DocumentTextRead)
+async def get_document_text_route(
+    corpus_id: uuid.UUID, document_id: uuid.UUID, session: SessionDep
+) -> DocumentTextRead:
+    document = await session.get(Document, document_id)
+    if document is None or document.corpus_id != corpus_id:
+        raise HTTPException(
+            status_code=404, detail=f"document {document_id} not found in corpus {corpus_id}"
+        )
+
+    text = await get_document_text(document)
+    return DocumentTextRead(document_id=document.id, filename=document.filename, text=text)

@@ -44,6 +44,20 @@ def save_upload(corpus_id: uuid.UUID, filename: str, content: bytes) -> Path:
     return path
 
 
+async def get_document_text(document: Document) -> str:
+    """Recover a document's full parsed text for `SourceViewer` (the only
+    caller: `GET /corpora/{id}/documents/{id}/text`). `ingest_file` never
+    persists this whole-document string -- only per-chunk slices, via
+    `Chunk.text` -- so the file `save_upload` wrote to disk, named exactly
+    `document.filename` per corpus (see its own docstring), is the only
+    place it still exists verbatim; re-parsing it is what recovers offsets
+    that line up with `Chunk.char_start`/`char_end`."""
+    settings = get_settings()
+    path = settings.CORPUS_ROOT / str(document.corpus_id) / document.filename
+    parsed = await parse_file(path)
+    return parsed.text
+
+
 async def ingest_file(session: AsyncSession, path: Path, corpus_id: uuid.UUID) -> Document:
     content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
 

@@ -694,3 +694,28 @@ Ambiguous calls made during the build, logged as they happen.
   that actually writes to `register_entries` would be a worse inconsistency
   than a few untested lines. No test exercises this path directly; it will
   be covered once Step 29's `update` node and `test_incremental.py` land.
+
+- **Added `GET /corpora/{corpus_id}/documents/{document_id}/text`**, not in
+  IMPLEMENTATION_PLAN.md section 9's API surface list. `frontend/src/components/SourceViewer.tsx`
+  (task_breakdown Step 30) needs a document's full text to highlight the
+  exact `[char_start, char_end]` a citation points to, and nothing else in
+  the API returns that -- `ingest_file` never persists the whole-document
+  string, only per-chunk slices (`Chunk.text`). The new route re-parses the
+  file `save_upload` already wrote to disk (`services/ingestion.get_document_text`,
+  a thin wrapper around the existing `parsers.parse_file`), which is exactly
+  the same parse `ingest_file` ran originally, so the returned text's
+  offsets stay consistent with `Chunk.char_start`/`char_end`. Scoped under
+  `/corpora/{corpus_id}/documents/...` to match `documents.py`'s existing
+  upload route rather than a flat `/documents/{id}/text`, and 404s if the
+  document doesn't belong to that corpus.
+
+- **`ReviewGate.tsx`'s "Submit decisions" sends `reviewer` in the POST
+  body, not as a bare `X-Reviewer` header**, even though the nav input that
+  captures it (task_breakdown Step 30's own assumption line) is labeled
+  `X-Reviewer` and the request also carries that header. This follows the
+  precedent already logged above for `POST /runs/{id}/review`: the actual
+  `ReviewSubmission` schema requires `reviewer` as an explicit body field
+  (it's stored on `reviews.reviewer` and copied onto `conflicts.resolved_by`
+  / `findings.reviewer`), so a header-only value would 422. The header is
+  still sent alongside the body for any future middleware that reads it,
+  but the body field is what the route actually consumes.
