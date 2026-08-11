@@ -16,8 +16,12 @@ specifically says "it ran and nothing was wrong."
 
 A `possible_prompt_injection` finding (CLAUDE.md behavior 8) is written
 for any `llm`-evaluator rule whose raw response trips
-`injection_guard.scan_response`, same as `extract.py`; it never changes
-what a rule concludes, only adds a finding a human reviews.
+`injection_guard.scan_response`, same as `extract.py`. A hit drops that
+response whole -- `services.rules._evaluate_llm` returns zero violations
+for it rather than parsing verdicts out of a response that may have been
+hijacked -- so the smell can change what a rule concludes (from "whatever
+the response said" to "nothing"), but never lets a compromised response's
+verdicts through silently.
 """
 
 from __future__ import annotations
@@ -135,7 +139,10 @@ async def examine_node(state: AgentState) -> dict[str, Any]:
                         rule_id="possible_prompt_injection",
                         severity="warning",
                         subject=None,
-                        message=f"examine: possible prompt injection smell in LLM response: {smell}",
+                        message=(
+                            "examine: possible prompt injection smell in LLM response "
+                            f"({smell.category}): {smell.excerpt!r}"
+                        ),
                     )
                 )
 

@@ -529,3 +529,41 @@ Ambiguous calls made during the build, logged as they happen.
   checkpoint "node completions" count from 5 to 6**, same mechanical
   update as `examine`'s own wiring above, for the same reason: one more
   node now sits on the path every run takes before `finish`.
+
+- **`injection_guard.scan_response` now returns `list[Smell]`** (a
+  `NamedTuple` of `category` + `excerpt`) instead of `list[str]` of raw
+  matched pattern text, per this step's explicit `scan_response(text) ->
+  list[Smell]` signature. `services/rules.py`'s `EvaluationResult
+  .injection_smells` and `_evaluate_llm`'s return type follow suit;
+  `extract.py`'s and `examine.py`'s Finding messages now cite
+  `smell.category`/`smell.excerpt` instead of interpolating the raw list.
+  `_SMELL_RULES` covers the five categories this step names (`ignore
+  previous`, `disregard instructions`, fetch-URL requests, email/send-data
+  requests, tool-behavior-change suggestions) plus the three heuristics
+  already present before this step (system-prompt probes, role overrides,
+  "don't tell the reviewer") — kept rather than removed, since they cost
+  nothing and catch smells the five named categories don't.
+
+- **Both `extract.py` and `services/rules.py`'s `_evaluate_llm` now drop
+  the LLM response whole on a `scan_response` hit**, instead of writing
+  the `possible_prompt_injection` Finding and then still parsing
+  claims/verdicts out of the same response. The prior behavior (present
+  since `extract` first landed in Step 19) logged the smell but let a
+  possibly-hijacked response's content through anyway, which contradicts
+  this step's explicit instruction ("on a hit, drop the response ... and
+  skip that document"). `extract.py` does this with a `continue` before
+  `_parse_response`; `_evaluate_llm` returns `([], smells)` before calling
+  `_parse_llm_verdicts`. Neither fails the run: `extract`'s loop moves on
+  to the next document, and `examine`'s loop moves on to the next rule.
+
+- **`wrap_sources` now escapes any literal `<untrusted_source>` /
+  `</untrusted_source>` tag-shaped text found inside a chunk's own
+  content** (HTML-entity-style, `<` -> `&lt;`, `>` -> `&gt;`) before
+  wrapping it, so a chunk can't forge a fake closing tag to make text
+  after it look like it sits outside the untrusted block. This is what
+  this step's "refuse to include any content outside those tags" reads as
+  literally: without it, a chunk containing a hand-crafted
+  `</untrusted_source>` substring could produce output where the *visual*
+  tag boundary no longer matches the *actual* one `wrap_sources` intended,
+  even though structurally everything is still inside the one block it
+  emitted for that chunk.

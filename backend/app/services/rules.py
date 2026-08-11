@@ -31,7 +31,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.state import ClaimDraft
-from backend.app.services.injection_guard import scan_response, wrap_sources
+from backend.app.services.injection_guard import Smell, scan_response, wrap_sources
 from backend.app.services.llm import call_claude
 
 logger = structlog.get_logger(__name__)
@@ -81,7 +81,7 @@ class Violation(BaseModel):
 
 class EvaluationResult(BaseModel):
     violations: list[Violation] = []
-    injection_smells: list[str] = []
+    injection_smells: list[Smell] = []
 
 
 def load_rules(path: Path) -> list[Rule]:
@@ -221,7 +221,7 @@ async def _evaluate_llm(
     rule: Rule,
     claims: list[ClaimDraft],
     doc_types_by_claim: dict[uuid.UUID, list[str]],
-) -> tuple[list[Violation], list[str]]:
+) -> tuple[list[Violation], list[Smell]]:
     spec = rule.llm
     assert spec is not None
 
@@ -237,6 +237,12 @@ async def _evaluate_llm(
     )
 
     smells = scan_response(response.text)
+    if smells:
+        # A smell means this response can't be trusted -- drop it whole
+        # rather than parsing verdicts out of it (CLAUDE.md behavior 8:
+        # a hit is a Finding for a human, never a silent side effect, but
+        # it also must never let a hijacked response's verdicts through).
+        return [], smells
 
     violations: list[Violation] = []
     for verdict in _parse_llm_verdicts(response.text):
@@ -253,7 +259,7 @@ async def _evaluate_llm(
             )
         )
 
-    return violations, smells
+    return violations, []
 
 
 async def evaluate_rules(

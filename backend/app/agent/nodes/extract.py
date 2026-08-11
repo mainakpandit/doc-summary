@@ -20,8 +20,11 @@ claim_sources are persisted; nothing is invented for missing data.
 
 Also runs `injection_guard.scan_response` on each raw LLM response and
 records a `possible_prompt_injection` Finding on a hit (CLAUDE.md behavior
-8) -- a smell never causes a silent side effect, but it also never fails
-the run on its own; a human reviews it at the gate.
+8). A hit drops that response whole and skips the rest of this document --
+no claims are parsed from a response that may have been hijacked by
+content embedded in the source -- but it never fails the run: the next
+document in `state.documents` is still processed, and a human reviews the
+finding at the gate. See `test_injection.py` (B8).
 """
 
 from __future__ import annotations
@@ -154,10 +157,16 @@ async def extract_node(state: AgentState) -> dict[str, Any]:
                         subject=str(doc.id),
                         message=(
                             "extract: possible prompt injection smell in LLM response "
-                            f"for document {doc.id}: {smells}"
+                            f"for document {doc.id}: "
+                            f"{[(s.category, s.excerpt) for s in smells]}"
                         ),
                     )
                 )
+                # Drop the response whole and skip this document -- a
+                # response that trips a smell can't be trusted enough to
+                # parse claims out of, but one poisoned document must not
+                # fail the whole run (CLAUDE.md behavior 8).
+                continue
 
             for parsed in _parse_response(response.text):
                 verified_sources = _verify_sources(parsed["sources"], chunk_lookup)
