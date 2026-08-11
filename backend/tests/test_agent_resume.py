@@ -113,9 +113,12 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
     # but the node still runs and checkpoints), step 4 is 'examine'
     # completing (no rules_path on this test's corpus -> zero rules, but
     # the node still runs, checkpoints, and writes its `examine_clean`
-    # audit event), and step 5 is 'finish' completing. So checkpoints with
-    # step >= 1 count real node executions -- exactly 5 on a correct
-    # resume, more than 5 if 'classify' (or anything else) re-ran.
+    # audit event), step 5 is 'build_register' completing (no persisted
+    # claims -> zero additions, but the node still runs, checkpoints, and
+    # writes its `register_diff_empty` audit event), and step 6 is
+    # 'finish' completing. So checkpoints with step >= 1 count real node
+    # executions -- exactly 6 on a correct resume, more than 6 if
+    # 'classify' (or anything else) re-ran.
     conn_string = graph_module._psycopg_conn_string(get_settings().DATABASE_URL)
     async with graph_module.AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
         compiled = graph_module.build_graph().compile(checkpointer=checkpointer)
@@ -123,7 +126,7 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
         history = [c async for c in compiled.aget_state_history(config)]
 
     node_completions = [c for c in history if c.metadata.get("step", -1) >= 1]
-    assert len(node_completions) == 5
+    assert len(node_completions) == 6
 
     # Both nodes are placeholders -- nothing should ever have been billed,
     # on either attempt.

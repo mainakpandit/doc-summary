@@ -460,3 +460,72 @@ Ambiguous calls made during the build, logged as they happen.
   also asserts an exact count of LangGraph checkpoint "node completions"
   for a full graph run, which necessarily went from 4 to 5 with a new
   node in the path.
+
+- **`build_register` (8.5, initial-run path) never writes to
+  `register_entries` / `register_field_sources`, even though the task
+  description's "Insert register_entries and register_field_sources rows"
+  read alone suggests it should.** The same paragraph immediately says
+  "Do not commit yet; this is the 'proposed' state that the human gate
+  will confirm" and "Store the proposal in `state.register_diff` as
+  `additions` only" — and `register_entries` has no `status`/`resolution`
+  column the way `findings`/`conflicts` do, so there is no way to mark a
+  row "proposed, not yet approved" the way those tables can. Writing a
+  live row before a human confirms it would make the proposal
+  indistinguishable from a committed one, contradicting "Humans gate
+  every commit" and CLAUDE.md behavior 9's mention of a dedicated
+  `commit` node (advisory-locked per `corpus_id`) as where mutations
+  land. Read the two instructions together as: this node computes what
+  *would* be inserted and hands it to the graph via
+  `state.register_diff.additions`; the literal `INSERT` is the
+  not-yet-built `commit` node's job, once `human_gate` (8.6) approves.
+  Each `RegisterEntryDraft.fields["sources"]` entry carries `field`,
+  `claim_id`, `chunk_id`, and `quote` specifically so that future `commit`
+  node has everything it needs to populate `register_field_sources`
+  (`field_name`, `claim_id` pairs) without re-deriving the winning claim
+  per field.
+
+- **`build_register` treats the claim predicate `"risk"` as the source of
+  `fields["open_risks"]`**, collecting every matching claim's `object`
+  (deduplicated, highest-confidence first) rather than picking one
+  winner the way `owner`/`target_release`/`status` do. No predicate
+  vocabulary for risks exists yet in `corpus/demo/rules.yaml` or any
+  `extract_*.txt` prompt, so this is this node's own naming choice, not
+  an existing contract — revisit if a rules playbook or extract prompt
+  later standardizes on a different predicate name (e.g. `"open_risk"` or
+  `"risks"`) for the same concept.
+
+- **`build_register`'s `"name"` field is the `subject` text of whichever
+  claim in the feature's group wins the same highest-confidence/most-
+  recent-`ingested_at` selection used for the other fields**, not a
+  claim with a literal `predicate == "name"` (no such predicate is
+  produced by extraction — a claim's `subject` already *is* the feature's
+  name). Two claims that slugify to the same `feature_key` can carry
+  slightly different `subject` casing/spelling ("Feature A" vs. "feature
+  a"); this picks the most-trusted one as canonical rather than the
+  first one seen.
+
+- **`build_register` queries `claims` for the whole `corpus_id` from the
+  database, not `state.claims`.** Matches the same call made for
+  `detect_conflicts` (8.3) above, and the task explicitly says "group all
+  persisted claims for the corpus" — for an `initial` run this is
+  equivalent to `state.claims` (nothing else could have populated
+  `claims` for a corpus before its first run), but querying directly
+  keeps the node correct if that assumption ever stops holding and
+  removes any dependency on `state.claims` staying in sync with what's
+  actually persisted.
+
+- **`build_register` no-ops for `kind == "update"` runs**, writing a
+  `build_register_skipped` audit event instead of computing anything.
+  The plan lists `build_register` and `update` as two separate 8.5
+  pieces and this task's instructions only specify the initial-run
+  grouping behavior; incremental register updates (diffing against
+  existing `register_entries` rows rather than proposing fresh ones) are
+  a distinct, not-yet-built piece of work, matching how `classify_review`
+  (8.1) stubs out its own out-of-scope corner instead of silently doing
+  nothing.
+
+- **Wiring `build_register` into `graph.py` (between `examine` and
+  `finish`) required bumping `test_agent_resume.py`'s expected
+  checkpoint "node completions" count from 5 to 6**, same mechanical
+  update as `examine`'s own wiring above, for the same reason: one more
+  node now sits on the path every run takes before `finish`.

@@ -10,10 +10,11 @@ graph from scratch (CLAUDE.md behavior 2 -- see `test_agent_resume.py`).
 `classify` (agent/nodes/classify.py, plan 8.1) is the first real node and
 replaces the old `start` placeholder as the graph's entry point; `extract`
 (agent/nodes/extract.py, plan 8.2), `detect_conflicts`
-(agent/nodes/detect_conflicts.py, plan 8.3), and `examine`
-(agent/nodes/examine.py, plan 8.4) follow. `finish` is still a
-placeholder. Real nodes (build_register, human_gate, commit -- plan
-section 8) extend this in later steps.
+(agent/nodes/detect_conflicts.py, plan 8.3), `examine`
+(agent/nodes/examine.py, plan 8.4), and `build_register`
+(agent/nodes/build_register.py, plan 8.5) follow. `finish` is still a
+placeholder. Real nodes (human_gate, commit -- plan section 8) extend this
+in later steps.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from backend.app.agent.nodes.build_register import build_register_node
 from backend.app.agent.nodes.classify import classify_node, classify_review_node
 from backend.app.agent.nodes.detect_conflicts import detect_conflicts_node
 from backend.app.agent.nodes.examine import examine_node
@@ -51,8 +53,8 @@ async def _finish_node(state: AgentState) -> dict:
 def build_graph() -> StateGraph:
     """Build (but do not compile) the graph:
 
-        START -> classify -+-> extract -> detect_conflicts -> examine -> finish -> END
-                            +-> classify_review -> extract -> detect_conflicts -> examine -> finish -> END
+        START -> classify -+-> extract -> detect_conflicts -> examine -> build_register -> finish -> END
+                            +-> classify_review -> extract -> detect_conflicts -> examine -> build_register -> finish -> END
 
     `classify` routes to `classify_review` only when it set
     `state.needs_classification_review`; otherwise it goes straight to
@@ -71,6 +73,7 @@ def build_graph() -> StateGraph:
     graph.add_node("extract", extract_node)
     graph.add_node("detect_conflicts", detect_conflicts_node)
     graph.add_node("examine", examine_node)
+    graph.add_node("build_register", build_register_node)
     graph.add_node("finish", _finish_node)
     graph.add_edge(START, "classify")
     graph.add_conditional_edges(
@@ -81,7 +84,8 @@ def build_graph() -> StateGraph:
     graph.add_edge("classify_review", "extract")
     graph.add_edge("extract", "detect_conflicts")
     graph.add_edge("detect_conflicts", "examine")
-    graph.add_edge("examine", "finish")
+    graph.add_edge("examine", "build_register")
+    graph.add_edge("build_register", "finish")
     graph.add_edge("finish", END)
     return graph
 
