@@ -635,3 +635,62 @@ Ambiguous calls made during the build, logged as they happen.
   the matching `_end` report the same stage name) -- CLAUDE.md just asks
   for "current stage plus counts," and the full detail is already
   available via `GET /runs/{id}/audit`.
+
+- **A conflict's approve/reject decision at the human gate maps to
+  `resolution='kept_both'` / `'rejected_both'`**, not `'kept_a'`/`'kept_b'`.
+  `POST /runs/{id}/review`'s contract (task_breakdown Step 25) is a binary
+  `decision: "approve"|"reject"` per item, and IMPLEMENTATION_PLAN.md 10.3
+  describes the review UI the same way ("an approve button, a reject
+  button") for every item kind, conflicts included -- there's no UI or API
+  surface for picking claim A over claim B specifically. Given only two
+  choices, "approve" reads as "acknowledge both claims stand despite the
+  disagreement" (`kept_both`) and "reject" as "neither assertion is trusted
+  going forward" (`rejected_both`), the two `conflicts.resolution` values
+  that don't require picking a winner. Note this doesn't feed back into
+  `build_register`'s field selection (it already ran, oblivious to
+  conflicts, before `human_gate`) -- resolving a conflict here records the
+  human's call but doesn't change which claim a given run's register fields
+  came from. Closing that gap is future work, not part of this step.
+
+- **`POST /runs/{id}/review`'s `reviewer` comes from the request body**
+  (`{items: [...], reviewer: string}`), as task_breakdown Step 25's prompt
+  specifies verbatim, rather than the `X-Reviewer` header CLAUDE.md's "Do
+  not add auth" section names as the repo's general reviewer-identity
+  convention. Read literally, "reviewer identity comes from the X-Reviewer
+  header" governs endpoints that need to know who's calling without an
+  explicit field for it; this is the first (and so far only) endpoint whose
+  request schema already carries an explicit `reviewer` as a piece of
+  decision data (whose call this was, stored on `reviews.reviewer` and
+  copied onto `conflicts.resolved_by` / `findings.reviewer`), not as
+  authentication -- there's still no check that the caller actually is that
+  reviewer, so "do not add auth" holds either way. If a later step adds
+  more human-gate-adjacent endpoints without their own reviewer field,
+  those should fall back to `X-Reviewer`.
+
+- **`POST /runs/{id}/resume` drives the graph resume synchronously inside
+  the request** (`agent/graph.resume_run`), rather than flipping
+  `runs.status` back to `'pending'` for a worker to pick up, which is what
+  IMPLEMENTATION_PLAN.md section 7.10 sketches ("the API layer flips a run
+  back to pending with a resume token; the worker picks it up"). `worker.py`
+  (task_breakdown Step 26, not yet built) is the only thing that polls for
+  `'pending'` runs, and even then only for genuinely new work via
+  `run_agent`, which starts a fresh `AgentState` when the checkpoint is
+  empty -- it has no path today for "resume a specific interrupted thread
+  with `Command(resume=...)`." Driving it synchronously from the route
+  mirrors how `run_once()`/`run_agent()` are already invoked directly
+  elsewhere in this codebase (e.g. `test_api_runs.py`) and keeps behavior 4
+  intact (MCP's future `resume_run` tool calls the same `agent.graph.resume_run`).
+  Revisit once Step 26 gives the worker a real polling story for
+  `awaiting_review` -> `pending` transitions.
+
+- **`agent/nodes/commit.py`'s `RegisterFieldChange` (update-run field
+  change) handling is implemented but unexercised.** `state.register_diff.changes`
+  is always `[]` today -- only `build_register` (initial runs) populates
+  `register_diff`, and it only ever writes `additions`; the `update` node
+  (task_breakdown Step 29) that would populate `changes` doesn't exist yet.
+  Implemented anyway rather than left as a gap, since `RegisterFieldChange`
+  already flows through `agent/state.py`, `services/review.py`, and
+  `human_gate_node` end to end -- silently dropping it at the one place
+  that actually writes to `register_entries` would be a worse inconsistency
+  than a few untested lines. No test exercises this path directly; it will
+  be covered once Step 29's `update` node and `test_incremental.py` land.

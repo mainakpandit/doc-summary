@@ -66,10 +66,19 @@ SINGLE_VALUE_FIELDS = ("owner", "target_release", "status")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _EPOCH = datetime.min.replace(tzinfo=UTC)
 
+# Fixed namespace for deriving RegisterEntryDraft.id deterministically from
+# (run_id, feature_key) -- see that field's docstring in agent/state.py for
+# why a proposal needs a stable id before any register_entries row exists.
+_REGISTER_ITEM_NAMESPACE = uuid.UUID("8f2f6b1a-2c3d-4e5f-9a1b-6c7d8e9f0a1b")
+
 
 def slugify(text: str) -> str:
     slug = _SLUG_RE.sub("-", text.strip().lower()).strip("-")
     return slug or "unknown"
+
+
+def _addition_id(run_id: uuid.UUID, feature_key: str) -> uuid.UUID:
+    return uuid.uuid5(_REGISTER_ITEM_NAMESPACE, f"{run_id}:{feature_key}")
 
 
 @dataclass
@@ -244,7 +253,13 @@ async def build_register_node(state: AgentState) -> dict[str, Any]:
         additions: list[RegisterEntryDraft] = []
         for feature_key in sorted(groups):
             fields = build_fields(groups[feature_key])
-            additions.append(RegisterEntryDraft(feature_key=feature_key, fields=fields))
+            additions.append(
+                RegisterEntryDraft(
+                    id=_addition_id(state.run_id, feature_key),
+                    feature_key=feature_key,
+                    fields=fields,
+                )
+            )
 
             session.add(
                 AuditEvent(

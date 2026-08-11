@@ -73,21 +73,37 @@ class FindingDraft(BaseModel):
 
 
 class RegisterEntryDraft(BaseModel):
-    """A proposed new `register_entries` row (initial runs only)."""
+    """A proposed new `register_entries` row (initial runs only).
 
+    `id` is a deterministic UUID5 (`agent.nodes.build_register._addition_id`),
+    not a real `register_entries.id` -- there is no row for this proposal
+    until `commit` (8.7) writes one (see build_register.py's docstring for
+    why register_entries itself is never written pre-approval), so
+    `human_gate` (8.6) and `reviews.item_id` need a stable identifier that
+    exists before that write happens. `status` starts `'pending'` and is
+    re-derived from the matching `reviews` row every time `human_gate`
+    runs (see `services/review.py`), the same way `FindingDraft.status`
+    reflects a human decision.
+    """
+
+    id: uuid.UUID
     feature_key: str
     fields: dict[str, Any]
+    status: Literal["pending", "approved", "rejected"] = "pending"
 
 
 class RegisterFieldChange(BaseModel):
     """One field of one existing register entry that an update run would
-    change, and the claim that causes the change (8.5)."""
+    change, and the claim that causes the change (8.5). `id` and `status`
+    mirror `RegisterEntryDraft` -- see its docstring."""
 
+    id: uuid.UUID
     feature_key: str
     field_name: str
     old_value: Any | None = None
     new_value: Any | None = None
     claim_id: uuid.UUID
+    status: Literal["pending", "approved", "rejected"] = "pending"
 
 
 class RegisterDiff(BaseModel):

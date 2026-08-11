@@ -115,10 +115,15 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
     # the node still runs, checkpoints, and writes its `examine_clean`
     # audit event), step 5 is 'build_register' completing (no persisted
     # claims -> zero additions, but the node still runs, checkpoints, and
-    # writes its `register_diff_empty` audit event), and step 6 is
-    # 'finish' completing. So checkpoints with step >= 1 count real node
-    # executions -- exactly 6 on a correct resume, more than 6 if
-    # 'classify' (or anything else) re-ran.
+    # writes its `register_diff_empty` audit event), step 6 is
+    # 'human_gate' completing (nothing pending -- no conflicts, findings,
+    # or register additions -- so it never calls `interrupt()`, just
+    # writes its `human_gate_clean` audit event and returns), step 7 is
+    # 'commit' completing (empty register_diff -> `commit_skipped` audit
+    # event, nothing to write), and step 8 is 'finish' completing. So
+    # checkpoints with step >= 1 count real node executions -- exactly 8
+    # on a correct resume, more than 8 if 'classify' (or anything else)
+    # re-ran.
     conn_string = graph_module._psycopg_conn_string(get_settings().DATABASE_URL)
     async with graph_module.AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
         compiled = graph_module.build_graph().compile(checkpointer=checkpointer)
@@ -126,7 +131,7 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
         history = [c async for c in compiled.aget_state_history(config)]
 
     node_completions = [c for c in history if c.metadata.get("step", -1) >= 1]
-    assert len(node_completions) == 6
+    assert len(node_completions) == 8
 
     # Both nodes are placeholders -- nothing should ever have been billed,
     # on either attempt.
