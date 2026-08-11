@@ -7,9 +7,11 @@ node; a killed-and-restarted worker calling `run_agent` again for the same
 `run_id` resumes from the last completed node instead of re-running the
 graph from scratch (CLAUDE.md behavior 2 -- see `test_agent_resume.py`).
 
-Only two placeholder nodes exist so far: `start` and `finish`. Real nodes
-(classify, extract, detect_conflicts, examine, build_register, human_gate,
-commit -- plan section 8) replace/extend this in later steps.
+`classify` (agent/nodes/classify.py, plan 8.1) is the first real node and
+replaces the old `start` placeholder as the graph's entry point; `finish`
+is still a placeholder. Real nodes (extract, detect_conflicts, examine,
+build_register, human_gate, commit -- plan section 8) extend this in later
+steps.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from backend.app.agent.nodes.classify import classify_node, classify_review_node
 from backend.app.agent.state import AgentState
 from backend.app.config import get_settings
 from backend.app.db import AsyncSessionLocal
@@ -30,10 +33,8 @@ from backend.app.models.run import Run
 logger = structlog.get_logger(__name__)
 
 
-async def _start_node(state: AgentState) -> dict:
-    logger.info("agent_node_enter", run_id=str(state.run_id), node="start")
-    logger.info("agent_node_exit", run_id=str(state.run_id), node="start")
-    return {}
+def _route_after_classify(state: AgentState) -> Literal["classify_review", "finish"]:
+    return "classify_review" if state.needs_classification_review else "finish"
 
 
 async def _finish_node(state: AgentState) -> dict:
@@ -43,19 +44,30 @@ async def _finish_node(state: AgentState) -> dict:
 
 
 def build_graph() -> StateGraph:
-    """Build (but do not compile) START -> start -> finish -> END.
+    """Build (but do not compile) the graph:
 
-    Called fresh by every `run_agent` invocation rather than compiled once
-    at import time, so `_start_node`/`_finish_node` are looked up by name
-    from this module's globals at call time -- tests that monkeypatch
-    either name (e.g. `test_agent_resume.py`) take effect on the next
-    `run_agent` call without needing a process restart.
+        START -> classify -+-> finish -> END
+                            +-> classify_review -> finish -> END
+
+    `classify` routes to `classify_review` only when it set
+    `state.needs_classification_review`; otherwise it goes straight to
+    `finish`. Called fresh by every `run_agent` invocation rather than
+    compiled once at import time, so `classify_node`/`_finish_node` are
+    looked up by name from this module's globals at call time -- tests
+    that monkeypatch either name (e.g. `test_agent_resume.py`) take effect
+    on the next `run_agent` call without needing a process restart.
     """
     graph = StateGraph(AgentState)
-    graph.add_node("start", _start_node)
+    graph.add_node("classify", classify_node)
+    graph.add_node("classify_review", classify_review_node)
     graph.add_node("finish", _finish_node)
-    graph.add_edge(START, "start")
-    graph.add_edge("start", "finish")
+    graph.add_edge(START, "classify")
+    graph.add_conditional_edges(
+        "classify",
+        _route_after_classify,
+        {"classify_review": "classify_review", "finish": "finish"},
+    )
+    graph.add_edge("classify_review", "finish")
     graph.add_edge("finish", END)
     return graph
 

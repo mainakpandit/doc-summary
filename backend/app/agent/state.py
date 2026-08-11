@@ -119,6 +119,10 @@ class AgentState(BaseModel):
     # populated as the graph runs
     documents: list[DocumentRef] = []
     classifications: dict[uuid.UUID, str] = {}
+    # Set by `classify` when any classification comes back below the
+    # confidence threshold; routes the graph to `classify_review` instead
+    # of straight to `finish` (see agent/nodes/classify.py).
+    needs_classification_review: bool = False
     claims: list[ClaimDraft] = []
     conflicts: list[ConflictDraft] = []
     findings: list[FindingDraft] = []

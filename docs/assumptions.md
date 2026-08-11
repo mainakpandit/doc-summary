@@ -295,3 +295,27 @@ Ambiguous calls made during the build, logged as they happen.
   on its own, only from `.coveragerc` / `setup.cfg` / `tox.ini` /
   `pyproject.toml`, so that flag is required for the sections to take
   effect at all.
+
+- **`classify` (8.1) sends only `document_id` and `filename` to the model,
+  never chunk text.** `DocumentRef` (agent/state.py) carries nothing else,
+  and fetching chunk content for this stage would be scope creep the task
+  didn't ask for. Filenames are treated as low-risk metadata rather than
+  the "source text" CLAUDE.md behavior 8 requires wrapping via
+  `injection_guard.wrap_sources` — that module doesn't exist yet as of
+  this step (no node has needed it before `classify`). This is a real gap,
+  not a permanent design decision: a filename is still attacker-influenced
+  input (a corpus contributor picks it), so once `injection_guard` lands
+  (expected with `extract`, 8.2, which does send chunk text), revisit
+  whether `classify`'s payload should route through `wrap_sources` /
+  `scan_response` too instead of being grandfathered out.
+
+- **`classify_review` (8.1) is a stub that only writes a
+  `classify_review_noted` audit event, not a real review UI.** Mirrors the
+  MVP cut CLAUDE.md already makes explicit for claims/conflicts/findings
+  ("Do not add per-claim human review to the UI for MVP. The gate handles
+  conflicts, findings, and register changes only.") — extending that same
+  cut to low-confidence classifications. The escalation itself is not
+  lost: `classify` already writes a `classify_escalated` audit event with
+  the offending `document_id`/`doc_type`/`confidence` before routing here,
+  so the information is in the audit log for `human_gate` (8.6) or a
+  future UI to surface if that scope is ever picked back up.
