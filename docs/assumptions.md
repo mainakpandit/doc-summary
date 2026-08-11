@@ -180,6 +180,71 @@ Ambiguous calls made during the build, logged as they happen.
   the vector side is empty and the assertion is purely about the trigram
   side of the fusion.
 
+- **`AsyncPostgresSaver` connects via `psycopg`, not `asyncpg`, so
+  `agent/graph.py` strips the `+asyncpg` driver suffix off
+  `settings.DATABASE_URL` before handing it to
+  `AsyncPostgresSaver.from_conn_string`.** SQLAlchemy's async engine needs
+  `postgresql+asyncpg://...`; `langgraph-checkpoint-postgres` opens its own
+  connection with `psycopg.AsyncConnection.connect(...)`, which doesn't
+  understand the `+asyncpg` suffix and would fail to parse it. Both drivers
+  end up pointed at the same single Postgres instance (CLAUDE.md: "one
+  database"), just over two separate connections/libraries — LangGraph
+  checkpoint tables are not visible through the SQLAlchemy engine or
+  `models/`, only through the saver.
+
+- **`agent/graph.py` rebuilds and recompiles the `StateGraph` inside every
+  `run_agent` call, instead of compiling once at import time.** Two
+  reasons: (1) `AsyncPostgresSaver.from_conn_string` is an async context
+  manager tied to one psycopg connection, so a fresh checkpointer (and
+  thus a fresh compile) per call avoids holding a connection open for the
+  worker's whole lifetime; (2) `build_graph()` looks up `_start_node` /
+  `_finish_node` by name from module globals at call time, so
+  `test_agent_resume.py` can `monkeypatch.setattr(graph_module,
+  "_finish_node", ...)` and have it take effect on the very next
+  `run_agent` call, with no need to reload the module or restart a
+  process to simulate "the worker crashed and restarted."
+
+- **`run_agent` does not catch exceptions or set `runs.status = 'failed'`.**
+  Step 17's instructions only specify the happy-path transition
+  (`pending -> running -> done`); a `runs.status` value of `'failed'` and
+  any retry/backoff policy around it are unspecified here and read as
+  Step 26's concern (concurrent worker reconciliation). Leaving a crashed
+  run's status exactly as the caller set it before invoking `run_agent`
+  (`worker.py` sets `'running'`) is also more honest: a real `kill -9`
+  wouldn't get a chance to run an `except` block either, so this is what
+  the state machine would actually look like after a real crash, not an
+  idealized one.
+
+- **`test_agent_resume.py`'s "restart the worker" step calls
+  `agent.graph.run_agent(...)` directly for the crashed run, rather than
+  calling `worker.claim_pending_run()` / `run_once()` a second time.**
+  `claim_pending_run()` only selects rows with `status = 'pending'`, and a
+  crashed run is left at `status = 'running'` (see above) — so a second
+  call to the worker's own pending-run picker would find nothing to do.
+  Reconciling orphaned `'running'` rows left behind by a killed worker
+  process is Step 26 (`SELECT ... FOR UPDATE SKIP LOCKED`), not this one.
+  Calling `run_agent` directly for the same `run_id` is what "the worker
+  process restarts and resumes the run it was on" reduces to at this
+  step, since `run_id` doubles as the LangGraph `thread_id` and resumption
+  is entirely keyed off that, not off `runs.status`.
+
+- **`AgentState`'s nested types (`DocumentRef`, `ClaimDraft`,
+  `ConflictDraft`, `FindingDraft`, `RegisterDiff`, `ReviewDecision`,
+  `RegisterEntryDraft`, `RegisterFieldChange`, `ClaimSourceDraft`) are
+  defined in `agent/state.py` even though implementation_plan.md section 8
+  only names them, not their fields.** Shaped each one to match what the
+  node that populates it is specified to produce later in the plan:
+  `ClaimDraft`/`ClaimSourceDraft` mirror `extract`'s `{subject, predicate,
+  object, confidence, sources: [{chunk_id, quote}]}` (8.2/Step 19),
+  `ConflictDraft` mirrors `detect_conflicts`'s `(subject, predicate,
+  claim_a_id, claim_b_id)` grouping (8.3/Step 20), `FindingDraft` mirrors
+  `examine`'s findings (8.4/Step 21), and `RegisterDiff`'s
+  `additions`/`changes`/`unaffected` mirror `build_register`/`update`'s
+  spec verbatim (8.5/Step 22, Step 30-2). None of this is populated yet —
+  only the `start`/`finish` placeholder nodes exist — so treat these
+  shapes as a first draft the node implementing each stage is free to
+  adjust once it's actually writing to them.
+
 - **`embed_chunks` retries a batch only on `httpx.TransportError`
   (connection failures, timeouts), not on any exception.** The task says
   "retries ... on network errors", not all errors; an HTTP error response
