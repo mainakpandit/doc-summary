@@ -7,7 +7,10 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.corpora import router as corpora_router
+from backend.app.api.documents import router as documents_router
 from backend.app.api.health import router as health_router
+from backend.app.api.runs import router as runs_router
 from backend.app.config import get_settings
 
 settings = get_settings()
@@ -51,3 +54,6 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(corpora_router)
+app.include_router(documents_router)
+app.include_router(runs_router)

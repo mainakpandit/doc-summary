@@ -27,6 +27,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from backend.app.agent.instrumentation import instrument
 from backend.app.agent.nodes.build_register import build_register_node
 from backend.app.agent.nodes.classify import classify_node, classify_review_node
 from backend.app.agent.nodes.detect_conflicts import detect_conflicts_node
@@ -36,6 +37,7 @@ from backend.app.agent.state import AgentState
 from backend.app.config import get_settings
 from backend.app.db import AsyncSessionLocal
 from backend.app.models.run import Run
+from backend.app.services.events import emit
 
 logger = structlog.get_logger(__name__)
 
@@ -66,15 +68,21 @@ def build_graph() -> StateGraph:
     from this module's globals at call time -- tests that monkeypatch
     either name (e.g. `test_agent_resume.py`) take effect on the next
     `run_agent` call without needing a process restart.
+
+    Every node is wrapped with `instrument` (CLAUDE.md behavior 1) so it
+    emits a `<name>_start` / `<name>_end` audit + SSE event on entry and
+    exit; this wrapping happens here, fresh, on every call too, so a
+    monkeypatched node (e.g. `_finish_node` in `test_agent_resume.py`) is
+    still the function `instrument` wraps.
     """
     graph = StateGraph(AgentState)
-    graph.add_node("classify", classify_node)
-    graph.add_node("classify_review", classify_review_node)
-    graph.add_node("extract", extract_node)
-    graph.add_node("detect_conflicts", detect_conflicts_node)
-    graph.add_node("examine", examine_node)
-    graph.add_node("build_register", build_register_node)
-    graph.add_node("finish", _finish_node)
+    graph.add_node("classify", instrument("classify", classify_node))
+    graph.add_node("classify_review", instrument("classify_review", classify_review_node))
+    graph.add_node("extract", instrument("extract", extract_node))
+    graph.add_node("detect_conflicts", instrument("detect_conflicts", detect_conflicts_node))
+    graph.add_node("examine", instrument("examine", examine_node))
+    graph.add_node("build_register", instrument("build_register", build_register_node))
+    graph.add_node("finish", instrument("finish", _finish_node))
     graph.add_edge(START, "classify")
     graph.add_conditional_edges(
         "classify",
@@ -103,6 +111,7 @@ async def _mark_run_done(run_id: uuid.UUID) -> None:
         if run is not None:
             run.status = "done"
             await session.commit()
+        await emit(session, run_id, "run_completed", {"status": "done"})
 
 
 async def run_agent(
@@ -118,10 +127,15 @@ async def run_agent(
     -- passing a fresh input again would re-enter at START and re-run
     every node, including ones already completed and checkpointed.
 
-    On success, flips `runs.status` to `'done'`. On failure, status is
-    left as whatever the caller set before calling this (worker.py sets
-    `'running'`) -- an honest reflection of "crashed mid-flight", and
-    exactly the state a real `kill -9` would leave behind.
+    On success, flips `runs.status` to `'done'` and emits a terminal
+    `run_completed` audit + SSE event -- the signal `GET /runs/{id}/events`
+    consumers (task_breakdown Step 24) watch for to know the stream is
+    finished. On failure, status is left as whatever the caller set before
+    calling this (worker.py sets `'running'`) -- an honest reflection of
+    "crashed mid-flight", and exactly the state a real `kill -9` would
+    leave behind; no terminal event is emitted, so a live SSE client
+    watching a crashed run simply stops receiving events rather than
+    seeing a false "completed".
     """
     settings = get_settings()
     conn_string = _psycopg_conn_string(settings.DATABASE_URL)

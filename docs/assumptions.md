@@ -567,3 +567,71 @@ Ambiguous calls made during the build, logged as they happen.
   tag boundary no longer matches the *actual* one `wrap_sources` intended,
   even though structurally everything is still inside the one block it
   emitted for that chunk.
+
+- **Every graph node is now wrapped with `agent/instrumentation.py`'s
+  `instrument()` at `build_graph()` time, rather than each node file
+  writing its own entry/exit audit event.** CLAUDE.md behavior 1 ("every
+  agent node emits SSE + audit events on entry and exit") wasn't actually
+  implemented before this step -- nodes only had `structlog` entry/exit
+  log lines, no `audit_events` rows and no SSE. A wrapper applied once in
+  `build_graph()` was chosen over touching all six node files because it
+  keeps each node's own internal audit writes (`classify_escalated`,
+  `register_entry_proposed`, ...) about *what it decided*, separate from
+  *whether it's running*, and because `build_graph()` already re-resolves
+  node functions from module globals on every call (for
+  `test_agent_resume.py`'s monkeypatching), so wrapping there doesn't
+  disturb that. Event names are `<node>_start` / `<node>_end` (e.g.
+  `classify_start`, `extract_start`); `run_agent()` also emits a
+  `run_completed` event right before flipping `runs.status` to `'done'`,
+  which `GET /runs/{id}/events` (task_breakdown Step 24) treats as the
+  terminal marker to stop streaming on. A run that crashes emits no
+  terminal event, matching `run_agent`'s existing "status stays whatever
+  the caller set" failure contract.
+
+- **`POST /runs` does not populate `AgentState.documents` from the
+  corpus's ingested documents.** Nothing in the codebase currently does
+  this -- `run_agent()` always starts a fresh run with `documents=[]`;
+  every existing node test builds `AgentState` by hand with real
+  `DocumentRef`s rather than going through `run_agent`. Wiring "which
+  documents does an initial vs. update run process" is a real design
+  question (all of a corpus's documents? just ones without a prior
+  successful extract?) that this step's task text doesn't specify, so
+  `classify`/`extract` currently run as structural no-ops (they still
+  execute and emit their `_start`/`_end` events) until a later step wires
+  this. `test_api_runs.py`'s `test_ingest_then_run_flow` documents this
+  gap directly: it asserts `total_usd_cost == 0.0` after a full
+  ingest-then-run flow, since no LLM call ever happens without documents
+  in scope.
+
+- **`runs.idempotency_key` is enforced globally unique by migration 001**
+  (not scoped per corpus), even though task_breakdown Step 24 describes
+  `POST /runs`'s `Idempotency-Key` semantics as "if seen for the same
+  corpus, return the existing run." `services/runs.py`'s `create_run`
+  looks the key up globally; if it's already attached to a run for a
+  *different* `corpus_id`, that's an `IdempotencyKeyConflict` (mapped to
+  HTTP 409) rather than either silently returning the wrong run or
+  hitting a raw `IntegrityError` from the unique constraint. The normal
+  case -- a client retrying the exact same request -- always pairs the
+  same key with the same corpus_id, so the 409 path only fires on a
+  client bug (reusing a key across genuinely different requests).
+
+- **`services.ingestion.save_upload` names uploaded files by content
+  hash** (`CORPUS_ROOT/<corpus_id>/<sha256>.<ext>`), which means
+  `Document.filename` (set by `ingest_file` to `path.name`) is the hash,
+  not the client's original filename. Task_breakdown Step 24 specifies
+  this exact save path, and `ingest_file` (Step 11) already sets
+  `filename = path.name` for every caller, so preserving the original
+  upload filename would mean either changing `ingest_file`'s established
+  behavior (used by the watcher and tests too) or adding an
+  `original_filename` column that doesn't exist in migration 001. Neither
+  is in scope here; the original filename is simply not retained.
+
+- **`GET /runs/{id}`'s `current_stage`** is derived from the most recent
+  `audit_events` row (for that run) whose `event_type` ends in `_start`
+  or `_end`, scanning newest-first past any of a node's own
+  business-detail events (e.g. `register_entry_proposed` sits between
+  `build_register_start` and `build_register_end`). It does not
+  distinguish "mid-flight" from "just finished" (both a fresh `_start` and
+  the matching `_end` report the same stage name) -- CLAUDE.md just asks
+  for "current stage plus counts," and the full detail is already
+  available via `GET /runs/{id}/audit`.

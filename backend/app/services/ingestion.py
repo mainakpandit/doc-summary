@@ -18,11 +18,30 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.config import get_settings
 from backend.app.models import Chunk, Document
 from backend.app.services.parsers import parse_file
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
+
+
+def save_upload(corpus_id: uuid.UUID, filename: str, content: bytes) -> Path:
+    """Write an uploaded file's bytes under
+    `CORPUS_ROOT/<corpus_id>/<sha256>.<ext>` (task_breakdown Step 24),
+    named by content hash rather than the client-supplied filename so
+    re-uploading identical bytes overwrites the same path instead of
+    accumulating duplicates on disk -- `ingest_file`'s own
+    `(corpus_id, content_hash)` dedup then decides whether that content is
+    new to this corpus."""
+    settings = get_settings()
+    content_hash = hashlib.sha256(content).hexdigest()
+    ext = Path(filename).suffix.lower()
+    corpus_dir = settings.CORPUS_ROOT / str(corpus_id)
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+    path = corpus_dir / f"{content_hash}{ext}"
+    path.write_bytes(content)
+    return path
 
 
 async def ingest_file(session: AsyncSession, path: Path, corpus_id: uuid.UUID) -> Document:
