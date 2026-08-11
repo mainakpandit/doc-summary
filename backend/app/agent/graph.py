@@ -34,6 +34,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
+from sqlalchemy import select
 
 from backend.app.agent.instrumentation import instrument
 from backend.app.agent.nodes.build_register import build_register_node
@@ -43,9 +44,11 @@ from backend.app.agent.nodes.detect_conflicts import detect_conflicts_node
 from backend.app.agent.nodes.examine import examine_node
 from backend.app.agent.nodes.extract import extract_node
 from backend.app.agent.nodes.human_gate import human_gate_node
-from backend.app.agent.state import AgentState
+from backend.app.agent.nodes.update import discover_update_scope, update_node
+from backend.app.agent.state import AgentState, DocumentRef
 from backend.app.config import get_settings
 from backend.app.db import AsyncSessionLocal
+from backend.app.models.document import Document
 from backend.app.models.run import Run
 from backend.app.services.events import emit
 
@@ -54,6 +57,10 @@ logger = structlog.get_logger(__name__)
 
 def _route_after_classify(state: AgentState) -> Literal["classify_review", "extract"]:
     return "classify_review" if state.needs_classification_review else "extract"
+
+
+def _route_after_examine(state: AgentState) -> Literal["build_register", "update"]:
+    return "build_register" if state.kind == "initial" else "update"
 
 
 async def _finish_node(state: AgentState) -> dict:
@@ -65,19 +72,22 @@ async def _finish_node(state: AgentState) -> dict:
 def build_graph() -> StateGraph:
     """Build (but do not compile) the graph:
 
-        START -> classify -+-> extract -> detect_conflicts -> examine -> build_register -> human_gate -> commit -> finish -> END
-                            +-> classify_review -> extract -> detect_conflicts -> examine -> build_register -> human_gate -> commit -> finish -> END
+        START -> classify -+-> extract -> detect_conflicts -> examine -+-> build_register -+-> human_gate -> commit -> finish -> END
+                            +-> classify_review -> extract (same path)  +-> update ----------+
 
     `classify` routes to `classify_review` only when it set
     `state.needs_classification_review`; otherwise it goes straight to
     `extract`, and `classify_review` falls through to `extract` too --
     escalation is a soft flag for a human, not a hard stop (see
-    `agent/nodes/classify.py`'s `classify_review_node` docstring). Called
-    fresh by every `run_agent` invocation rather than compiled once at
-    import time, so `classify_node`/`_finish_node` are looked up by name
-    from this module's globals at call time -- tests that monkeypatch
-    either name (e.g. `test_agent_resume.py`) take effect on the next
-    `run_agent` call without needing a process restart.
+    `agent/nodes/classify.py`'s `classify_review_node` docstring). After
+    `examine`, `state.kind` decides `build_register` (initial runs) vs.
+    `update` (update runs, agent/nodes/update.py) -- both produce the same
+    `state.register_diff` shape and both feed `human_gate`. Called fresh by
+    every `run_agent` invocation rather than compiled once at import time,
+    so `classify_node`/`_finish_node` are looked up by name from this
+    module's globals at call time -- tests that monkeypatch either name
+    (e.g. `test_agent_resume.py`) take effect on the next `run_agent` call
+    without needing a process restart.
 
     Every node is wrapped with `instrument` (CLAUDE.md behavior 1) so it
     emits a `<name>_start` / `<name>_end` audit + SSE event on entry and
@@ -96,6 +106,7 @@ def build_graph() -> StateGraph:
     graph.add_node("detect_conflicts", instrument("detect_conflicts", detect_conflicts_node))
     graph.add_node("examine", instrument("examine", examine_node))
     graph.add_node("build_register", instrument("build_register", build_register_node))
+    graph.add_node("update", instrument("update", update_node))
     graph.add_node("human_gate", instrument("human_gate", human_gate_node))
     graph.add_node("commit", instrument("commit", commit_node))
     graph.add_node("finish", instrument("finish", _finish_node))
@@ -108,8 +119,13 @@ def build_graph() -> StateGraph:
     graph.add_edge("classify_review", "extract")
     graph.add_edge("extract", "detect_conflicts")
     graph.add_edge("detect_conflicts", "examine")
-    graph.add_edge("examine", "build_register")
+    graph.add_conditional_edges(
+        "examine",
+        _route_after_examine,
+        {"build_register": "build_register", "update": "update"},
+    )
     graph.add_edge("build_register", "human_gate")
+    graph.add_edge("update", "human_gate")
     graph.add_edge("human_gate", "commit")
     graph.add_edge("commit", "finish")
     graph.add_edge("finish", END)
@@ -164,6 +180,45 @@ async def _setup_checkpointer(checkpointer: AsyncPostgresSaver) -> None:
         )
 
 
+async def _load_initial_documents(corpus_id: uuid.UUID) -> list[DocumentRef]:
+    """Every document ingested for `corpus_id` so far, oldest first -- the
+    scope an `initial` run's `classify`/`extract` process. Documents ingested
+    *after* this run starts are out of scope; they'll surface through their
+    own `update` runs (see `services/watcher.py`) instead."""
+    async with AsyncSessionLocal() as session:
+        docs = (
+            await session.scalars(
+                select(Document)
+                .where(Document.corpus_id == corpus_id)
+                .order_by(Document.ingested_at)
+            )
+        ).all()
+        return [DocumentRef(id=d.id, filename=d.filename) for d in docs]
+
+
+async def _load_run_scope(
+    run_id: uuid.UUID, corpus_id: uuid.UUID, kind: Literal["initial", "update"]
+) -> tuple[list[DocumentRef], uuid.UUID | None]:
+    """The `(documents, trigger_doc_id)` a fresh run's `AgentState` starts
+    with -- every corpus document for an `initial` run, or the triggering
+    document plus any retrieval-matched neighbors
+    (`agent/nodes/update.discover_update_scope`) for an `update` run.
+    `trigger_doc_id` comes from the `runs` row itself
+    (`runs.triggering_document_id`, set by `services/watcher.py`) rather than
+    a `run_agent` parameter, so this stays a no-op signature change for every
+    existing caller."""
+    if kind == "initial":
+        return await _load_initial_documents(corpus_id), None
+
+    async with AsyncSessionLocal() as session:
+        run = await session.get(Run, run_id)
+        trigger_doc_id = run.triggering_document_id if run else None
+        if trigger_doc_id is None:
+            return [], None
+        documents = await discover_update_scope(session, corpus_id, trigger_doc_id)
+        return documents, trigger_doc_id
+
+
 async def _mark_run_done(run_id: uuid.UUID) -> None:
     async with AsyncSessionLocal() as session:
         run = await session.get(Run, run_id)
@@ -212,11 +267,17 @@ async def run_agent(
         config = {"configurable": {"thread_id": str(run_id)}}
 
         existing = await graph.aget_state(config)
-        graph_input = (
-            None
-            if existing.values
-            else AgentState(run_id=run_id, corpus_id=corpus_id, kind=kind, trigger_doc_id=None)
-        )
+        if existing.values:
+            graph_input = None
+        else:
+            documents, trigger_doc_id = await _load_run_scope(run_id, corpus_id, kind)
+            graph_input = AgentState(
+                run_id=run_id,
+                corpus_id=corpus_id,
+                kind=kind,
+                trigger_doc_id=trigger_doc_id,
+                documents=documents,
+            )
 
         await graph.ainvoke(graph_input, config=config)
         current_state = await graph.aget_state(config)

@@ -22,11 +22,14 @@ reject a sibling register addition and the finding), resumes through
 
 As in test_agent_resume.py / test_conflicts.py / test_build_register.py,
 claims/conflicts/findings are seeded directly rather than produced through a
-live LLM: `run_agent` always starts a fresh `AgentState` with
-`documents=[]` (classify/extract are structural no-ops -- see
-docs/assumptions.md), but `detect_conflicts` and `build_register` both read
-straight from the database rather than from `state.claims`, so pre-seeded
-rows are exactly what they see. Uses a plain `httpx.AsyncClient` against the
+live LLM: `run_agent` now routes this corpus's one real document
+(`prd_features.md`) through `classify`/`extract` (task_breakdown Step 30
+wired `AgentState.documents` -- see docs/assumptions.md), so `fake_llm`
+fixture responses for both stages are registered below, but the extract
+fixture returns zero claims -- `detect_conflicts` and `build_register` both
+read straight from the database rather than from `state.claims`, so the
+pre-seeded rows below remain exactly what they see. Uses a plain
+`httpx.AsyncClient` against the
 real app (not the SAVEPOINT-nested `async_client` fixture) so writes made
 inside the graph's own `AsyncSessionLocal()` sessions are visible to the API
 calls and vice versa -- same reasoning as test_api_runs.py. Marked
@@ -36,6 +39,7 @@ other node test.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -43,6 +47,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, insert, select
 
 from backend.app.agent.graph import run_agent
+from backend.app.agent.nodes.classify import SYSTEM_PROMPT as CLASSIFY_SYSTEM_PROMPT
+from backend.app.agent.nodes.classify import build_batch_messages
+from backend.app.agent.nodes.extract import SYSTEM_PROMPTS as EXTRACT_SYSTEM_PROMPTS
+from backend.app.agent.nodes.extract import build_messages as build_extract_messages
+from backend.app.agent.state import DocumentRef
 from backend.app.db import AsyncSessionLocal, engine
 from backend.app.main import app
 from backend.app.models import (
@@ -61,6 +70,7 @@ from backend.app.models import (
     Run,
 )
 from backend.app.models.finding import finding_sources
+from backend.tests.fakes import cache_key
 
 pytestmark = pytest.mark.integration
 
@@ -214,8 +224,35 @@ async def seeded_run():
 
 
 @pytest.mark.integration
-async def test_mixed_review_decision_survives_resume(seeded_run):
-    corpus_id, run_id, _doc_id, release_1_id = seeded_run
+async def test_mixed_review_decision_survives_resume(seeded_run, fake_llm):
+    corpus_id, run_id, doc_id, release_1_id = seeded_run
+
+    # `run_agent` now routes this corpus's one document through
+    # classify/extract (task_breakdown Step 30). classify just needs a
+    # doc_type; extract returns zero claims so the claims/conflicts/finding
+    # seeded directly above by `seeded_run` remain the only ones in play.
+    async with AsyncSessionLocal() as session:
+        chunks = list(
+            (await session.scalars(select(Chunk).where(Chunk.document_id == doc_id))).all()
+        )
+    doc_ref = [DocumentRef(id=doc_id, filename="prd_features.md")]
+    fake_llm._responses[
+        cache_key("classify", CLASSIFY_SYSTEM_PROMPT, build_batch_messages(doc_ref))
+    ] = {
+        "text": json.dumps([{"document_id": str(doc_id), "doc_type": "prd", "confidence": 0.95}]),
+        "input_tokens": 50,
+        "output_tokens": 20,
+        "stop_reason": "end_turn",
+    }
+    extract_key = cache_key(
+        "extract", EXTRACT_SYSTEM_PROMPTS["prd"], build_extract_messages(chunks)
+    )
+    fake_llm._responses[extract_key] = {
+        "text": "[]",
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "stop_reason": "end_turn",
+    }
 
     await run_agent(run_id, corpus_id, "initial")
 

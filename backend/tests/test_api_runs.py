@@ -33,17 +33,24 @@ when DATABASE_URL is unreachable, matching that same pattern.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete
 
+from backend.app.agent.nodes.classify import SYSTEM_PROMPT as CLASSIFY_SYSTEM_PROMPT
+from backend.app.agent.nodes.classify import build_batch_messages
+from backend.app.agent.nodes.extract import SYSTEM_PROMPTS as EXTRACT_SYSTEM_PROMPTS
+from backend.app.agent.nodes.extract import build_messages as build_extract_messages
+from backend.app.agent.state import DocumentRef
 from backend.app.db import AsyncSessionLocal, engine
 from backend.app.main import app
 from backend.app.models import AuditEvent, Corpus, CostEvent, Document, Run
 from backend.app.services import ingestion as ingestion_module
 from backend.app.worker import run_once
+from backend.tests.fakes import cache_key
 
 pytestmark = pytest.mark.integration
 
@@ -102,6 +109,32 @@ async def test_ingest_then_run_flow(api_client, fake_llm):
     assert persisted is not None
     assert len(persisted.chunks) >= 1
 
+    # `run_agent` now routes every corpus document through classify/extract
+    # (task_breakdown Step 30 wired `AgentState.documents` -- see
+    # docs/assumptions.md), so this run's one uploaded document needs fixture
+    # responses for both stages. extract returns zero claims: this test only
+    # cares about the run reaching 'done' with real, non-zero cost, not about
+    # register content.
+    doc_ref = [DocumentRef(id=persisted.id, filename=persisted.filename)]
+    classify_key = cache_key("classify", CLASSIFY_SYSTEM_PROMPT, build_batch_messages(doc_ref))
+    fake_llm._responses[classify_key] = {
+        "text": json.dumps(
+            [{"document_id": str(persisted.id), "doc_type": "prd", "confidence": 0.9}]
+        ),
+        "input_tokens": 50,
+        "output_tokens": 20,
+        "stop_reason": "end_turn",
+    }
+    extract_key = cache_key(
+        "extract", EXTRACT_SYSTEM_PROMPTS["prd"], build_extract_messages(persisted.chunks)
+    )
+    fake_llm._responses[extract_key] = {
+        "text": "[]",
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "stop_reason": "end_turn",
+    }
+
     idempotency_key = "api-runs-test-key"
     run_resp_1 = await api_client.post(
         "/runs",
@@ -136,7 +169,9 @@ async def test_ingest_then_run_flow(api_client, fake_llm):
     assert cost_resp.status_code == 200
     cost = cost_resp.json()
     assert cost["run_id"] == run_id
-    assert cost["total_usd_cost"] == 0.0  # no documents were routed into this run's state yet
+    # classify + extract each billed one FakeLLM call for the uploaded doc.
+    assert cost["total_usd_cost"] > 0.0
+    assert {s["stage"] for s in cost["stages"]} == {"classify", "extract"}
 
     audit_resp = await api_client.get(f"/runs/{run_id}/audit")
     assert audit_resp.status_code == 200
