@@ -309,6 +309,64 @@ Ambiguous calls made during the build, logged as they happen.
   whether `classify`'s payload should route through `wrap_sources` /
   `scan_response` too instead of being grandfathered out.
 
+- **`backend/app/services/injection_guard.py` (`wrap_sources` /
+  `scan_response`) lands with `extract` (8.2), not as a separate step.**
+  This is exactly the gap the `classify` (8.1) assumption above flagged:
+  `extract` is the first node to send chunk text to an LLM, so it's the
+  first node that needs the CLAUDE.md behavior 8 module to exist at all.
+  Put it under `services/` (alongside `llm.py`, `embeddings.py`,
+  `retrieval.py`) rather than `agent/`, since it's a stateless text
+  transform with no dependency on `AgentState` and future nodes besides
+  `extract` (e.g. `examine`, 8.4) will plausibly need it too.
+  `wrap_sources` takes `list[tuple[uuid.UUID, str]]` rather than `Chunk`
+  ORM objects, so the module has no dependency on `models/` and is
+  unit-testable without a database. `classify` (8.1) is *not* retrofitted
+  to route its filename-only payload through this module in this step --
+  that revisit is still open, unchanged from the prior note.
+
+- **`extract` (8.2) calls `injection_guard.scan_response` on every LLM
+  response and, on a hit, writes a `possible_prompt_injection` Finding**
+  (not just an audit event), even though the task instructions for this
+  step only spelled out the quote-verification path. CLAUDE.md behavior 8
+  says a scan hit must produce a `possible_prompt_injection` *finding*,
+  and the `findings` table already has exactly the shape for it
+  (`rule_id`, `severity`, `subject`, `message`, `status`) -- writing an
+  audit event instead would technically log the hit but not what the
+  behavior names. A hit does not fail the run or reject the claim on its
+  own; it's a signal for a human at the gate, matching "never a silent
+  side effect" without turning a heuristic smell test into a hard block.
+
+- **`extract` (8.2) drops a claim entirely if *any* of its sources fails
+  quote verification, rather than dropping just the bad source and
+  keeping the claim with its remaining valid sources.** The task
+  instructions say "If not, drop the claim" (singular decision per claim,
+  not per source), and this is also the more conservative reading of "no
+  bluff": a claim backed by one fabricated citation is not more
+  trustworthy just because it also happens to cite one real one.
+
+- **`extract` (8.2) is wired into the graph as `classify -> extract ->
+  finish`, with `classify_review` also falling through to `extract`**
+  (previously `classify`'s non-escalated branch went straight to
+  `finish`, and `classify_review` also went straight to `finish`). Low
+  classification confidence is a soft escalation for a human, not a
+  reason to skip extraction, so both branches now converge on `extract`
+  before `finish`. This changes `test_agent_resume.py`'s node-completion
+  count for an empty-documents run from 2 (`classify`, `finish`) to 3
+  (`classify`, `extract`, `finish`) -- updated in the same commit rather
+  than left to fail, since behavior 2 (resumable) is the thing that test
+  exists to protect and the count itself, not the resume logic, is what
+  changed.
+
+- **`extract` (8.2) sends the *entire* set of a document's chunks to
+  Claude in one `call_claude` invocation per document**, not a
+  `retrieval.retrieve`-style top-k query. The task says "for each
+  document, retrieve its chunks" (all of them, in document order by
+  `idx`) -- `retrieval.retrieve` is a similarity search keyed on a query
+  string, which doesn't fit "extract every claim from this whole
+  document." No batching/splitting across multiple calls for large
+  documents is added here; that's a cost/context-limit concern out of
+  this step's scope.
+
 - **`classify_review` (8.1) is a stub that only writes a
   `classify_review_noted` audit event, not a real review UI.** Mirrors the
   MVP cut CLAUDE.md already makes explicit for claims/conflicts/findings

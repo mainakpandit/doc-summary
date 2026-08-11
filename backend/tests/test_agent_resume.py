@@ -99,14 +99,15 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
 
     assert calls["finish"] == 2  # first call raised, second (the resume) succeeded
 
-    # Inspect the checkpointer directly: 'start' must not have re-run.
+    # Inspect the checkpointer directly: 'classify' must not have re-run.
     # Empirically (verified against a real Postgres checkpointer), this
-    # two-node graph's checkpoints carry metadata.step == -1 (pre-input)
-    # and 0 (input applied, no node run yet) before any real node
-    # executes; step 1 is 'start' completing and step 2 is 'finish'
-    # completing. So checkpoints with step >= 1 count real node
-    # executions -- exactly 2 on a correct resume, more than 2 if 'start'
-    # (or anything else) re-ran.
+    # graph's checkpoints carry metadata.step == -1 (pre-input) and 0
+    # (input applied, no node run yet) before any real node executes;
+    # step 1 is 'classify' completing, step 2 is 'extract' completing
+    # (an empty-documents run routes straight past 'classify_review'),
+    # and step 3 is 'finish' completing. So checkpoints with step >= 1
+    # count real node executions -- exactly 3 on a correct resume, more
+    # than 3 if 'classify' (or anything else) re-ran.
     conn_string = graph_module._psycopg_conn_string(get_settings().DATABASE_URL)
     async with graph_module.AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
         compiled = graph_module.build_graph().compile(checkpointer=checkpointer)
@@ -114,7 +115,7 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
         history = [c async for c in compiled.aget_state_history(config)]
 
     node_completions = [c for c in history if c.metadata.get("step", -1) >= 1]
-    assert len(node_completions) == 2
+    assert len(node_completions) == 3
 
     # Both nodes are placeholders -- nothing should ever have been billed,
     # on either attempt.
