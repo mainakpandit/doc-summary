@@ -132,7 +132,16 @@ async def get_run_cost(session: AsyncSession, run_id: uuid.UUID) -> dict[str, An
 
 
 async def get_run_audit(session: AsyncSession, run_id: uuid.UUID) -> list[AuditEvent]:
+    """Ordered by `occurred_at` -- "what changed, when" (CLAUDE.md behavior
+    1) -- with `id` (insertion order) as a tiebreaker for rows that share a
+    timestamp (e.g. several events written in one node's transaction, where
+    Postgres's `now()` is constant for the whole transaction). `id` alone
+    would coincide with `occurred_at` order in the overwhelmingly common
+    case (rows are, in fact, inserted in chronological order) but isn't
+    actually what "ordered by time" asks for; see test_cost.py."""
     result = await session.scalars(
-        select(AuditEvent).where(AuditEvent.run_id == run_id).order_by(AuditEvent.id)
+        select(AuditEvent)
+        .where(AuditEvent.run_id == run_id)
+        .order_by(AuditEvent.occurred_at, AuditEvent.id)
     )
     return list(result.all())
