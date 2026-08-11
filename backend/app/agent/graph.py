@@ -25,6 +25,7 @@ handlers stay thin (CLAUDE.md).
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Literal
 
@@ -122,6 +123,47 @@ def _psycopg_conn_string(database_url: str) -> str:
     return f"{scheme.split('+', 1)[0]}://{rest}"
 
 
+async def _setup_checkpointer(checkpointer: AsyncPostgresSaver) -> None:
+    """`checkpointer.setup()` runs unguarded `CREATE TABLE IF NOT EXISTS` +
+    migration-row DDL that Postgres does not make safe against two
+    connections calling it at once before the tables exist yet -- the
+    check-then-create race on 'IF NOT EXISTS' DDL can raise a
+    `UniqueViolation` on the underlying catalog row (see
+    docs/architecture.md). Every concurrent `run_agent` (CLAUDE.md
+    behavior 9) calls this once per invocation, so it's serialized with a
+    session-level advisory lock keyed on a fixed name.
+
+    Uses `pg_try_advisory_lock` in a poll loop rather than the blocking
+    `pg_advisory_lock` -- empirically, a caller *blocked waiting* to
+    acquire that lock is itself a lock wait Postgres's deadlock detector
+    tracks, and concurrent DDL's catalog-level locking is enough to close
+    a wait cycle through it (observed as spurious `DeadlockDetected`
+    errors under `test_concurrent.py`'s two-process test). A non-blocking
+    try-and-poll can't be part of a wait-for cycle the same way: a caller
+    that doesn't get the lock immediately just backs off and retries
+    instead of registering a blocking wait, so this whole class of
+    deadlock can't arise. Explicitly unlocked in `finally` rather than
+    left to release on connection close, since the checkpointer connection
+    stays open for the rest of the graph run and unrelated concurrent runs
+    must not be serialized by it too.
+    """
+    while True:
+        cur = await checkpointer.conn.execute(
+            "SELECT pg_try_advisory_lock(hashtext('langgraph_checkpointer_setup'))"
+        )
+        row = await cur.fetchone()
+        if row["pg_try_advisory_lock"]:
+            break
+        await asyncio.sleep(0.05)
+
+    try:
+        await checkpointer.setup()
+    finally:
+        await checkpointer.conn.execute(
+            "SELECT pg_advisory_unlock(hashtext('langgraph_checkpointer_setup'))"
+        )
+
+
 async def _mark_run_done(run_id: uuid.UUID) -> None:
     async with AsyncSessionLocal() as session:
         run = await session.get(Run, run_id)
@@ -165,7 +207,7 @@ async def run_agent(
     conn_string = _psycopg_conn_string(settings.DATABASE_URL)
 
     async with AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
-        await checkpointer.setup()
+        await _setup_checkpointer(checkpointer)
         graph: CompiledStateGraph = build_graph().compile(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": str(run_id)}}
 
@@ -204,7 +246,7 @@ async def resume_run(run_id: uuid.UUID) -> None:
     conn_string = _psycopg_conn_string(settings.DATABASE_URL)
 
     async with AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
-        await checkpointer.setup()
+        await _setup_checkpointer(checkpointer)
         graph: CompiledStateGraph = build_graph().compile(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": str(run_id)}}
 
@@ -227,7 +269,7 @@ async def get_agent_state(run_id: uuid.UUID) -> AgentState | None:
     conn_string = _psycopg_conn_string(settings.DATABASE_URL)
 
     async with AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
-        await checkpointer.setup()
+        await _setup_checkpointer(checkpointer)
         graph: CompiledStateGraph = build_graph().compile(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": str(run_id)}}
         snapshot = await graph.aget_state(config)
