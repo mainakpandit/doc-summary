@@ -410,3 +410,53 @@ Ambiguous calls made during the build, logged as they happen.
   restarted between `extract` and `detect_conflicts`, the checkpointed
   `AgentState` should already carry the persisted claims either way, but
   querying the table directly removes any dependency on that being true.
+
+- **Rules playbook (8.4) deterministic DSL uses structured YAML fields
+  (`op`/`predicate`/`value`), not a literal `every_subject_has(owner)`
+  function-call string.** The task's prose describes the three predicate
+  verbs with call syntax, but parsing that out of a YAML scalar (handling
+  quoting, values containing parens, etc.) buys nothing a
+  `Literal["every_subject_has", "no_subject_has", "at_least_one"]` field
+  doesn't already give for free via pydantic validation. `backend/app/agent/rules/schema.md`
+  documents the mapping between the two notations explicitly so the
+  function-call shorthand in this file's own prose still reads correctly.
+
+- **The third starter rule (`shipped_requires_release_notes`) uses the
+  `llm` evaluator, not `deterministic`.** "No feature has status=shipped
+  without a linked release-notes source" needs to know which *document*
+  backs a claim, not just its `(subject, predicate, object)` triple — the
+  three-verb predicate DSL only ever looks at claim fields, so it
+  structurally cannot express this rule. `examine_node` resolves each
+  claim's backing document `doc_type`s via `claim_sources -> chunks ->
+  documents` and hands that (plus the claims' verbatim quotes, wrapped
+  per CLAUDE.md behavior 8) to `call_claude(stage="examine")`.
+
+- **`finding_sources` (still unmapped as a declarative class, per the
+  existing note above) is now populated via a bare `sqlalchemy.Table`
+  sharing `Base.metadata`, defined in `models/finding.py` next to
+  `Finding` rather than in `services/rules.py` or `agent/nodes/examine.py`.**
+  Keeps every table's shape in `models/`, Core or declarative, in one
+  place; `examine.py` imports `finding_sources` and writes to it with
+  `insert()`, same as any other model.
+
+- **`examine` (8.4) writes an `examine_clean` audit event whenever zero
+  rules produced a violation, including when the corpus has no
+  `rules_path` at all (zero rules to evaluate).** "Nothing was wrong" is
+  trivially true with nothing to check, and it keeps the event's meaning
+  uniform — "examine ran and every rule that existed passed" — rather
+  than requiring callers to distinguish "ran with zero rules" from "ran
+  and passed." A `possible_prompt_injection` finding from a `scan_response`
+  hit on an `llm`-rule's response does not suppress `examine_clean` (it
+  isn't a rule violation), matching how `extract`'s own injection finding
+  doesn't touch that node's claim-acceptance logic either.
+
+- **Wiring `examine` into `graph.py` (between `detect_conflicts` and
+  `finish`) required updating `test_agent_resume.py`'s fixture and
+  assertions**, discovered by running the full suite after this step: the
+  fixture's `pending_run` teardown deleted `Run` before `AuditEvent`,
+  which started raising a `ForeignKeyViolationError` once `examine` began
+  writing an `examine_clean` audit event for that test's (rules-less)
+  corpus on every run — teardown now deletes `AuditEvent` first. The test
+  also asserts an exact count of LangGraph checkpoint "node completions"
+  for a full graph run, which necessarily went from 4 to 5 with a new
+  node in the path.

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text, text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Table, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,7 +32,21 @@ class Finding(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-# finding_sources (migration 001) has no primary key and no relationship is
-# named in the model spec, so it isn't ORM-mapped here — see
-# docs/assumptions.md. Write to it with Core (sqlalchemy.Table / insert())
-# if it's needed later.
+# finding_sources (migration 001) has no primary key and no unique
+# constraint (`finding_id` NOT NULL; `chunk_id`/`claim_id` both nullable),
+# so it isn't a declarative class — see docs/assumptions.md. Mapped as a
+# bare Core Table sharing Base.metadata instead; populated with
+# `insert(finding_sources)` by agent/nodes/examine.py, the first caller
+# that needs to write to it.
+finding_sources = Table(
+    "finding_sources",
+    Base.metadata,
+    Column(
+        "finding_id",
+        UUID(as_uuid=True),
+        ForeignKey("findings.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("chunk_id", UUID(as_uuid=True), ForeignKey("chunks.id"), nullable=True),
+    Column("claim_id", UUID(as_uuid=True), ForeignKey("claims.id"), nullable=True),
+)

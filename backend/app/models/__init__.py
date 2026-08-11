@@ -20,7 +20,7 @@ from backend.app.models.conflict import Conflict
 from backend.app.models.corpus import Corpus
 from backend.app.models.cost import CostEvent
 from backend.app.models.document import Document
-from backend.app.models.finding import Finding
+from backend.app.models.finding import Finding, finding_sources
 from backend.app.models.register_entry import RegisterEntry, RegisterFieldSource
 from backend.app.models.review import Review
 from backend.app.models.run import Run
@@ -40,4 +40,5 @@ __all__ = [
     "RegisterFieldSource",
     "Review",
     "Run",
+    "finding_sources",
 ]

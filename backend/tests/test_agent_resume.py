@@ -24,7 +24,7 @@ from sqlalchemy import delete, select
 from backend.app.agent import graph as graph_module
 from backend.app.config import get_settings
 from backend.app.db import AsyncSessionLocal, engine
-from backend.app.models import Corpus, CostEvent, Run
+from backend.app.models import AuditEvent, Corpus, CostEvent, Run
 from backend.app.worker import run_once
 
 
@@ -55,6 +55,10 @@ async def pending_run():
 
     async with AsyncSessionLocal() as session:
         await session.execute(delete(CostEvent).where(CostEvent.run_id == rid))
+        # examine (plan 8.4) writes an `examine_clean` AuditEvent even for a
+        # run with zero claims -- has to go before Run is deleted, or that
+        # FK violates.
+        await session.execute(delete(AuditEvent).where(AuditEvent.run_id == rid))
         await session.execute(delete(Run).where(Run.id == rid))
         await session.execute(delete(Corpus).where(Corpus.id == cid))
         await session.commit()
@@ -106,10 +110,12 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
     # step 1 is 'classify' completing, step 2 is 'extract' completing
     # (an empty-documents run routes straight past 'classify_review'),
     # step 3 is 'detect_conflicts' completing (no claims -> no conflicts,
-    # but the node still runs and checkpoints), and step 4 is 'finish'
-    # completing. So checkpoints with step >= 1 count real node
-    # executions -- exactly 4 on a correct resume, more than 4 if
-    # 'classify' (or anything else) re-ran.
+    # but the node still runs and checkpoints), step 4 is 'examine'
+    # completing (no rules_path on this test's corpus -> zero rules, but
+    # the node still runs, checkpoints, and writes its `examine_clean`
+    # audit event), and step 5 is 'finish' completing. So checkpoints with
+    # step >= 1 count real node executions -- exactly 5 on a correct
+    # resume, more than 5 if 'classify' (or anything else) re-ran.
     conn_string = graph_module._psycopg_conn_string(get_settings().DATABASE_URL)
     async with graph_module.AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
         compiled = graph_module.build_graph().compile(checkpointer=checkpointer)
@@ -117,7 +123,7 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
         history = [c async for c in compiled.aget_state_history(config)]
 
     node_completions = [c for c in history if c.metadata.get("step", -1) >= 1]
-    assert len(node_completions) == 4
+    assert len(node_completions) == 5
 
     # Both nodes are placeholders -- nothing should ever have been billed,
     # on either attempt.

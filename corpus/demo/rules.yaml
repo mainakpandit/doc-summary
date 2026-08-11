@@ -1,0 +1,27 @@
+# Rules playbook for the demo corpus. Schema and full field reference:
+# backend/app/agent/rules/schema.md
+
+rules:
+  - id: every_feature_has_owner
+    description: Every feature must have an assigned owner.
+    severity: warning
+    deterministic:
+      op: every_subject_has
+      predicate: owner
+
+  - id: every_feature_has_target_release
+    description: Every feature must have a target release.
+    severity: warning
+    deterministic:
+      op: every_subject_has
+      predicate: target_release
+
+  - id: shipped_requires_release_notes
+    description: >-
+      No feature may be marked status=shipped unless at least one of its
+      claims is sourced from a release-notes document.
+    severity: error
+    llm:
+      select_predicate: status
+      select_object: shipped
+      prompt: examine_shipped_requires_release_notes.txt
