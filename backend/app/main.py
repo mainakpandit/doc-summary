@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.corpora import router as corpora_router
 from backend.app.api.documents import router as documents_router
 from backend.app.api.health import router as health_router
-from backend.app.api.register import router as register_router
 from backend.app.api.reviews import router as reviews_router
 from backend.app.api.runs import router as runs_router
 from backend.app.config import get_settings
@@ -60,4 +59,3 @@ app.include_router(corpora_router)
 app.include_router(documents_router)
 app.include_router(runs_router)
 app.include_router(reviews_router)
-app.include_router(register_router)

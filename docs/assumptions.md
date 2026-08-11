@@ -719,38 +719,3 @@ Ambiguous calls made during the build, logged as they happen.
   / `findings.reviewer`), so a header-only value would 422. The header is
   still sent alongside the body for any future middleware that reads it,
   but the body field is what the route actually consumes.
-
-- **Added `GET /corpora/{id}/register` (`api/register.py`,
-  `services/register.py`, `schemas/register.py`).** The Register page task
-  named this URL as something to fetch, but no route or service for it
-  existed yet -- only `register_entries`/`register_field_sources` tables and
-  `commit_node`, which write them. Built it the same way every other
-  resource here is: a thin route (404s on unknown `corpus_id`) delegating to
-  a service that, per committed entry, groups `register_field_sources` by
-  `field_name` and resolves each backing claim's predicate/object/confidence
-  plus its citations. Also extracted `services/review.py`'s private
-  `_citation`/`_claim_citations` into a new `services/citations.py`
-  (`build_citation`/`claim_citations`) so both services -- and the
-  frontend's single `Citation` type -- agree on exactly one citation shape,
-  rather than the register service growing its own second copy.
-
-- **The Register page's "Sources" column is the union of every citation
-  across all of an entry's fields, not a literal `fields.sources`
-  column** (no such field exists -- `sources` is stripped out of `fields`
-  before `register_entries` is written, see `commit.py`). Its info-icon
-  popover lists every distinct backing claim for the row (deduped by
-  `claim_id`), so it doubles as a "show everything behind this feature"
-  view. This does mean a claim already visible under, say, Owner also shows
-  up in Sources' popover -- accepted as a reasonable redundancy rather than
-  omitting the union column the task asked for by name.
-
-- **`Register.tsx` resolves its `corpus_id` from a `?corpus=` query param
-  (defaulting to the first corpus returned by `listCorpora`), not a route
-  param.** The task asked for the page to be wired into the top nav as a
-  single link, but nothing in the frontend today lets a user pick a corpus
-  before landing on a corpus-scoped page -- `RunsList`/`RunDetail` sidestep
-  this by not being corpus-scoped at all. Rather than inventing a separate
-  corpus-picker page the task didn't ask for, `/register` carries an
-  in-page `<select>` that updates the query param, so the route stays a
-  single stable nav target while still being deep-linkable/shareable per
-  corpus.

@@ -37,12 +37,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.state import RegisterDiff
 from backend.app.models.chunk import Chunk
+from backend.app.models.claim import ClaimSource
 from backend.app.models.conflict import Conflict
 from backend.app.models.document import Document
 from backend.app.models.finding import Finding, finding_sources
 from backend.app.models.review import Review
 from backend.app.schemas.review import ReviewItemDecision
-from backend.app.services.citations import build_citation, claim_citations as _claim_citations
+
+_SNIPPET_PADDING = 80
 
 
 class UnknownReviewItemError(Exception):
@@ -52,6 +54,42 @@ class UnknownReviewItemError(Exception):
     belongs to a different run). `register_change` items have no backing
     row to validate against here; `api/reviews.py` validates those against
     `build_review_payload`'s current pending set before calling this."""
+
+
+def _citation(chunk: Chunk, filename: str, quote: str) -> dict[str, Any]:
+    """One citation: the chunk's own char span (already stored, `chunks`
+    table) plus a padded text snippet with the quote's offset within that
+    snippet -- what `GET /runs/{id}/review`'s "text snippet with the
+    highlight range" asks for."""
+    local_idx = chunk.text.find(quote)
+    highlight_len = len(quote) if local_idx != -1 else 0
+    local_idx = max(local_idx, 0)
+    snippet_start = max(0, local_idx - _SNIPPET_PADDING)
+    snippet_end = min(len(chunk.text), local_idx + highlight_len + _SNIPPET_PADDING)
+    return {
+        "chunk_id": str(chunk.id),
+        "document_id": str(chunk.document_id),
+        "document_filename": filename,
+        "page": chunk.page,
+        "quote": quote,
+        "char_start": chunk.char_start,
+        "char_end": chunk.char_end,
+        "snippet": chunk.text[snippet_start:snippet_end],
+        "highlight_start": local_idx - snippet_start,
+        "highlight_end": local_idx - snippet_start + highlight_len,
+    }
+
+
+async def _claim_citations(session: AsyncSession, claim_id: uuid.UUID) -> list[dict[str, Any]]:
+    rows = (
+        await session.execute(
+            select(ClaimSource.quote, Chunk, Document.filename)
+            .join(Chunk, Chunk.id == ClaimSource.chunk_id)
+            .join(Document, Document.id == Chunk.document_id)
+            .where(ClaimSource.claim_id == claim_id)
+        )
+    ).all()
+    return [_citation(chunk, filename, quote) for quote, chunk, filename in rows]
 
 
 async def _load_pending_conflicts(session: AsyncSession, run_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -110,7 +148,7 @@ async def _load_pending_findings(session: AsyncSession, run_id: uuid.UUID) -> li
                 chunk = await session.get(Chunk, chunk_id)
                 if chunk is not None:
                     document = await session.get(Document, chunk.document_id)
-                    sources.append(build_citation(chunk, document.filename if document else "", ""))
+                    sources.append(_citation(chunk, document.filename if document else "", ""))
         items.append(
             {
                 "id": str(finding.id),
@@ -135,7 +173,7 @@ async def _enrich_register_sources(
             enriched.append(source)
             continue
         document = await session.get(Document, chunk.document_id)
-        citation = build_citation(
+        citation = _citation(
             chunk, document.filename if document else source.get("document", ""), source["quote"]
         )
         enriched.append({**source, **citation})

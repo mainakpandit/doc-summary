@@ -2,7 +2,6 @@ import { Route, Routes } from 'react-router-dom'
 import { NavBar } from '@/components/NavBar'
 import { Toaster } from '@/components/Toaster'
 import { Home } from '@/pages/Home'
-import { Register } from '@/pages/Register'
 import { RunsList } from '@/pages/RunsList'
 import { RunDetail } from '@/pages/RunDetail'
 import { ReviewGate } from '@/pages/ReviewGate'
@@ -19,7 +18,6 @@ function App() {
       <main className="flex flex-1 flex-col p-6">
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/register" element={<Register />} />
           <Route path="/runs" element={<RunsList />} />
           <Route path="/runs/:id" element={<RunDetail />} />
           <Route path="/runs/:id/review" element={<ReviewGate />} />

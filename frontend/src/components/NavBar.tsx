@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils'
 
 const LINKS = [
   { to: '/', label: 'Home', end: true },
-  { to: '/register', label: 'Register', end: false },
   { to: '/runs', label: 'Runs', end: false },
 ]
 
