@@ -93,3 +93,53 @@ of it. `backend/tests/test_concurrent.py`
 runs two `commit_node` calls concurrently against the same
 `register_entries` row via `asyncio.gather` and asserts both field changes
 and both version increments survive.
+
+## Movement 3: the watcher and update runs
+
+`backend/app/services/watcher.py` runs as its own process
+(`python -m backend.app.services.watcher`), watching
+`settings.CORPUS_ROOT / "inbox"` with `watchdog`. On a new file whose size
+has stopped changing for two seconds, it resolves which `Corpus` owns that
+folder (`corpora.inbox_path == str(inbox_dir)`), calls the same
+`services.ingestion.ingest_file` the HTTP upload path uses, and inserts one
+`runs` row (`kind='update'`, `status='pending'`,
+`triggering_document_id=<new document>`). It never drives the graph itself
+— same division of labor as `POST /runs`: enqueue here, `worker.py` claims
+and runs it.
+
+`agent/graph.py`'s `run_agent` resolves the scope of a fresh run's
+`AgentState.documents` before entering the graph: every document in the
+corpus for an `initial` run, or (for `update`) the triggering document plus
+up to three other documents `agent/nodes/update.discover_update_scope`
+finds via a `pg_trgm` `similarity()` floor against the trigger document's
+own chunk text. `classify`/`extract` then process exactly that scope, same
+as always. After `examine`, the graph branches on `state.kind`:
+`build_register` for `initial` runs, `agent/nodes/update.update_node` for
+`update` runs. Both produce the same `RegisterDiff` shape and feed the same
+`human_gate`/`commit` — an update run's proposed additions and field
+changes go through the identical review gate as an initial run's.
+
+`update_node`'s diff is scoped to the `feature_key`s this run's own
+extracted claims mention (`RegisterDiff.unaffected`'s docstring in
+`agent/state.py`): for each one, it recomputes the winning claim per field
+from *every* persisted claim for that feature (old and new together, same
+selection rule `build_register` uses) and compares the result against what
+`register_field_sources` currently records. A `feature_key` this run's
+claims never touch is never examined at all, so `commit_node` never writes
+to its `register_entries` row — not even `updated_at` — which is exactly
+what `backend/tests/test_incremental.py` verifies end to end.
+
+## MCP server
+
+`backend/app/mcp_server.py` (`python -m backend.app.mcp_server`, stdio
+transport) is a second, thin caller of the same `services/*` functions
+`backend/app/api/*.py`'s HTTP routes call — no business logic of its own,
+per CLAUDE.md ("HTTP and MCP call the same service layer"). It does not
+expose a tool for driving the graph itself, for the same reason the watcher
+doesn't: `start_run` only enqueues a `pending` row, and `worker.py` is what
+actually runs it, whether the run was created over HTTP, MCP, or by the
+watcher. `backend/tests/test_mcp.py` spawns the server as a real subprocess
+and drives a full run through it, using the in-process worker
+(`backend.app.worker.run_once`) to stand in for a separately-running
+worker process — the same substitution `test_api_runs.py`/`test_human_gate.py`
+already make.

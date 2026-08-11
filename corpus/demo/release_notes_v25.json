@@ -1,0 +1,9 @@
+[
+  {
+    "feature": "Search Improvements",
+    "status": "shipped",
+    "owner": "Raj Patel",
+    "released": "2026-Q2",
+    "notes": "Reduced median search latency and improved relevance ranking for multi-word queries."
+  }
+]

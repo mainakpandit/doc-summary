@@ -1,0 +1,5 @@
+Q4 Planning Notes
+
+Billing API Migration: Jordan Lee confirmed as owner, still targeting a 2027-Q1 release given the SDK deprecation risk.
+
+Search Autocomplete: no owner assigned yet. Risk raised: suggestion latency under a cold cache needs a design review before this can move past in_progress.

@@ -754,3 +754,111 @@ Ambiguous calls made during the build, logged as they happen.
   in-page `<select>` that updates the query param, so the route stays a
   single stable nav target while still being deep-linkable/shareable per
   corpus.
+
+## Step 30: watcher, update runs, MCP server, polish
+
+- **`AgentState.documents` is now actually populated by `run_agent`,
+  closing the gap logged above ("`POST /runs` does not populate
+  `AgentState.documents`").** This wasn't explicitly asked for by name in
+  this step's task text, but both `agent/nodes/update.py` (needs to know
+  which document(s) an update run is scoped to) and `test_mcp.py` (needs a
+  real register to compare HTTP vs. MCP) are unworkable without it. An
+  `initial` run gets every `Document` in the corpus, oldest first; an
+  `update` run gets the triggering document (`runs.triggering_document_id`)
+  plus retrieval-matched neighbors (see below). `trigger_doc_id` is read
+  from the `runs` row itself inside `run_agent`, not added as a new
+  parameter -- every existing caller (`worker.py`, every test) keeps
+  calling `run_agent(run_id, corpus_id, kind)` unchanged. This did require
+  updating two existing tests (`test_human_gate.py`, `test_api_runs.py`)
+  that depended on the old "documents=[] always" behavior to route their
+  documents through FakeLLM fixtures that return zero/matching claims
+  instead; see each file's docstring.
+
+- **Update-run neighbor discovery uses a raw `pg_trgm similarity()` floor
+  (`update.NEIGHBOR_MIN_TRIGRAM_SIMILARITY = 0.15`), not
+  `services/retrieval.retrieve`'s reciprocal-rank-fusion score.** RRF only
+  ranks candidates against each other, so on a corpus with few documents
+  (true of every demo/test corpus in this repo) the one other document
+  always lands in the top-k regardless of whether it has anything to do
+  with the trigger document -- which would defeat "only re-extract on the
+  triggering document" for exactly the corpora where it's easiest to
+  notice. A raw similarity score with a real floor doesn't have that
+  failure mode. This also means neighbor discovery doesn't touch
+  embeddings at all (no `embed_query` call) -- deliberately, since nothing
+  in this codebase's ingestion path calls `embed_chunks` either (still true
+  as of this step; `services/embeddings.py` exists and is tested in
+  isolation, but no graph node or the watcher invokes it), so requiring
+  embeddings for update-run scoping to work at all would make it silently
+  do nothing on a real, unembedded demo corpus. Wiring embedding into
+  ingestion (or the watcher) is future work.
+
+- **`RegisterFieldChange` for a multi-source field (`open_risks`) cites one
+  representative claim, not all of them.** The schema (`agent/state.py`,
+  fixed before this step) gives a change exactly one `claim_id`; when an
+  update run's diff adds more than one new risk claim at once, the lowest
+  UUID among the newly-added ones is cited as the "cause" while `new_value`
+  still carries the complete updated list (so `commit_node`'s wholesale
+  `entry.fields[field] = new_value` doesn't lose any risks). A reviewer
+  seeing that change's citation therefore sees one of possibly several
+  sources, not the full set. Changing the schema to carry a list of
+  claim_ids per change would fix this properly but touches `commit.py`,
+  `services/review.py`, and every existing test that constructs a
+  `RegisterFieldChange` -- out of scope for this step.
+
+- **`detect_conflicts_node` is unchanged and still only compares claims
+  within the same run (`Claim.run_id == run_id`).** An update run's new
+  claim disagreeing with a claim from a *prior* run therefore never
+  surfaces as a `conflicts` row -- only disagreements the triggering
+  document (plus its neighbors) introduces *within itself* do. Broadening
+  conflict detection to the full corpus history for update runs is a real
+  gap but a separate, larger change (it'd need to decide how a new claim
+  "conflicts" with an already-committed register field, not just another
+  fresh claim); logged here rather than folded into `agent/nodes/update.py`.
+
+- **`services/runs.get_run_audit` now orders by `(occurred_at, id)`
+  instead of `id` alone.** Task_breakdown Step 30 (4) asks to "confirm...
+  `GET /runs/:id/audit` returns events ordered by time" -- the two orderings
+  coincide in the overwhelmingly common case (rows are, in fact, inserted
+  chronologically), but `id` is an insertion-sequence number, not a
+  timestamp, so it isn't actually what "ordered by time" asks for. Fixed
+  rather than merely confirmed; see `test_cost.py`, which proves the
+  distinction by inserting rows with explicit timestamps out of insertion
+  order.
+
+- **`services/watcher.py` resolves which corpus a dropped file belongs to
+  by matching the watched directory's path against `corpora.inbox_path`.**
+  The watcher only ever watches one physical folder
+  (`settings.CORPUS_ROOT / "inbox"`), so this is really "which corpus (if
+  any) declared this exact folder as its inbox" rather than per-corpus
+  subfolder routing. A file dropped in before any corpus claims that path
+  is logged and skipped rather than guessed at. Only `backend/scripts/
+  seed_demo.py`'s `demo` corpus is wired to the real watched folder;
+  `demo2` gets its own unwatched placeholder `inbox_path`
+  (`CORPUS_ROOT/demo2_inbox`) since only one corpus can own the one real
+  inbox folder at a time.
+
+- **`backend/scripts/seed_demo.py` dedupes by `(corpus_id, filename)`, not
+  by delegating entirely to `ingest_file`'s content-hash dedup.**
+  `python-docx`'s `.save()` embeds a per-write timestamp in its zip
+  container, so regenerating a byte-identical-content `.docx` on every
+  script run produces a *different* sha256 each time -- content-hash dedup
+  alone would silently accumulate a near-duplicate `Document` row for
+  `corpus/demo2/prd_billing_migration.docx` on every `make dev`. Checking
+  "have I already seeded this filename into this corpus" first sidesteps
+  the non-determinism and is arguably the more natural idempotency
+  question for a seed script anyway.
+
+- **The MCP server is built on `mcp` 2.0.0's `mcp.server.mcpserver.MCPServer`
+  (`@server.tool()`, `server.run()`), not the `FastMCP` class documented in
+  older versions of the SDK -- this repo's installed `mcp` (pinned
+  unconstrained in `pyproject.toml`, currently resolves to 2.0.0) renamed
+  and restructured that surface.** Verified by reading the installed
+  package's source directly and by spawning a real server + client against
+  it before writing `mcp_server.py`/`test_mcp.py`, rather than relying on
+  possibly-stale documentation. One behavior worth calling out for anyone
+  extending this file: `CallToolResult.structured_content` carries a tool's
+  return value directly for a JSON-object return type, but a JSON-array
+  return type (e.g. `list_corpora`, `get_register`) comes back wrapped as
+  `{"result": [...]}` (2025-11-25/2025-06-18 protocol versions require
+  structured content to be a JSON object); `test_mcp.py`'s `_unwrap` helper
+  normalizes both.

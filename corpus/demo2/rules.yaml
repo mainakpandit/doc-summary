@@ -1,0 +1,17 @@
+# Rules playbook for the demo2 corpus. Same predicate vocabulary as
+# corpus/demo/rules.yaml -- schema at backend/app/agent/rules/schema.md.
+
+rules:
+  - id: every_feature_has_owner
+    description: Every feature must have an assigned owner.
+    severity: warning
+    deterministic:
+      op: every_subject_has
+      predicate: owner
+
+  - id: every_feature_has_target_release
+    description: Every feature must have a target release.
+    severity: warning
+    deterministic:
+      op: every_subject_has
+      predicate: target_release
