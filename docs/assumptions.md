@@ -377,3 +377,36 @@ Ambiguous calls made during the build, logged as they happen.
   the offending `document_id`/`doc_type`/`confidence` before routing here,
   so the information is in the audit log for `human_gate` (8.6) or a
   future UI to surface if that scope is ever picked back up.
+
+- **`detect_conflicts` (8.3) only creates a `conflicts` row for a pair of
+  claims whose `object` actually differs, not for every pair within a
+  qualifying `(subject, predicate)` group.** A group with 3+ claims can
+  have >1 distinct object while still containing same-object pairs (e.g.
+  objects `[A, A, B]`); pairing all `C(n, 2)` combinations would record a
+  row for the `(A, A)` pair even though those two claims agree, which
+  isn't a conflict by any reading of the term. The self-join instead
+  requires `a.object <> b.object` in addition to `a.id < b.id` (the
+  latter just avoids emitting both orderings of the same pair).
+  `resolution` starts `'unresolved'` per the task spec; no de-duplication
+  beyond that is attempted (e.g. collapsing transitive conflicts across
+  3+ distinct objects into fewer rows) since the task only specifies
+  per-pair rows.
+
+- **`detect_conflicts` (8.3)'s single SQL statement avoids `COUNT(DISTINCT
+  object) OVER (PARTITION BY subject, predicate)`** — Postgres rejects
+  `DISTINCT` inside a window function call outright. `DENSE_RANK() OVER
+  (PARTITION BY subject, predicate ORDER BY object)` is used instead:
+  claims sharing an `object` get the same rank within their group, so
+  `MAX(that rank) OVER (PARTITION BY subject, predicate)` in a second CTE
+  layered on top is the distinct-object count without needing `DISTINCT`
+  inside a window frame at all. Window functions can't nest in a single
+  `SELECT`, which is why this is two stacked CTEs (`ranked`, then
+  `scored`) rather than one.
+
+- **`detect_conflicts` (8.3) queries `claims` for the current `run_id`
+  directly from the database, not `state.claims`.** Matches `extract`
+  (8.2) re-fetching `chunks` from the DB rather than trusting in-memory
+  state, and keeps the node correct on resume: if the graph is killed and
+  restarted between `extract` and `detect_conflicts`, the checkpointed
+  `AgentState` should already carry the persisted claims either way, but
+  querying the table directly removes any dependency on that being true.

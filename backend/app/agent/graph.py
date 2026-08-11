@@ -25,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from backend.app.agent.nodes.classify import classify_node, classify_review_node
+from backend.app.agent.nodes.detect_conflicts import detect_conflicts_node
 from backend.app.agent.nodes.extract import extract_node
 from backend.app.agent.state import AgentState
 from backend.app.config import get_settings
@@ -47,8 +48,8 @@ async def _finish_node(state: AgentState) -> dict:
 def build_graph() -> StateGraph:
     """Build (but do not compile) the graph:
 
-        START -> classify -+-> extract -> finish -> END
-                            +-> classify_review -> extract -> finish -> END
+        START -> classify -+-> extract -> detect_conflicts -> finish -> END
+                            +-> classify_review -> extract -> detect_conflicts -> finish -> END
 
     `classify` routes to `classify_review` only when it set
     `state.needs_classification_review`; otherwise it goes straight to
@@ -65,6 +66,7 @@ def build_graph() -> StateGraph:
     graph.add_node("classify", classify_node)
     graph.add_node("classify_review", classify_review_node)
     graph.add_node("extract", extract_node)
+    graph.add_node("detect_conflicts", detect_conflicts_node)
     graph.add_node("finish", _finish_node)
     graph.add_edge(START, "classify")
     graph.add_conditional_edges(
@@ -73,7 +75,8 @@ def build_graph() -> StateGraph:
         {"classify_review": "classify_review", "extract": "extract"},
     )
     graph.add_edge("classify_review", "extract")
-    graph.add_edge("extract", "finish")
+    graph.add_edge("extract", "detect_conflicts")
+    graph.add_edge("detect_conflicts", "finish")
     graph.add_edge("finish", END)
     return graph
 

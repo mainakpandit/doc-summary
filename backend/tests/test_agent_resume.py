@@ -105,9 +105,11 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
     # (input applied, no node run yet) before any real node executes;
     # step 1 is 'classify' completing, step 2 is 'extract' completing
     # (an empty-documents run routes straight past 'classify_review'),
-    # and step 3 is 'finish' completing. So checkpoints with step >= 1
-    # count real node executions -- exactly 3 on a correct resume, more
-    # than 3 if 'classify' (or anything else) re-ran.
+    # step 3 is 'detect_conflicts' completing (no claims -> no conflicts,
+    # but the node still runs and checkpoints), and step 4 is 'finish'
+    # completing. So checkpoints with step >= 1 count real node
+    # executions -- exactly 4 on a correct resume, more than 4 if
+    # 'classify' (or anything else) re-ran.
     conn_string = graph_module._psycopg_conn_string(get_settings().DATABASE_URL)
     async with graph_module.AsyncPostgresSaver.from_conn_string(conn_string) as checkpointer:
         compiled = graph_module.build_graph().compile(checkpointer=checkpointer)
@@ -115,7 +117,7 @@ async def test_resume_after_crash_skips_completed_nodes(pending_run, monkeypatch
         history = [c async for c in compiled.aget_state_history(config)]
 
     node_completions = [c for c in history if c.metadata.get("step", -1) >= 1]
-    assert len(node_completions) == 3
+    assert len(node_completions) == 4
 
     # Both nodes are placeholders -- nothing should ever have been billed,
     # on either attempt.
