@@ -1,0 +1,54 @@
+[project]
+name = "pm-analyst-backend"
+version = "0.1.0"
+description = "Agentic system that ingests PM documents and produces a Feature Register"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]>=2",
+    "asyncpg",
+    "alembic",
+    "anthropic",
+    "langgraph",
+    "langgraph-checkpoint-postgres",
+    "pgvector",
+    "pypdf",
+    "pdfplumber",
+    "python-docx",
+    "python-magic",
+    "watchdog",
+    "pyyaml",
+    "httpx",
+    "sse-starlette",
+    "mcp",
+    "structlog",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff>=0.16.2",
+    "testcontainers[postgres]",
+    "vcrpy",
+]
+
+# pytest config lives in pytest.ini at the repo root, not here -- pytest
+# only reads one of the two, and pytest.ini wins when both exist.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.uv]
+package = false

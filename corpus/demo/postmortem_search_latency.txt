@@ -1,0 +1,3 @@
+Postmortem -- Search Improvements Launch
+
+Owner: Raj Patel. Following the Search Improvements release, a brief latency regression under peak load was observed and resolved within two hours by rolling back a caching change. Open risk: cache warm-up time under cold starts remains unaddressed.

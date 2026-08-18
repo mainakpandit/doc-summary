@@ -1,0 +1,8 @@
+[
+  {
+    "feature": "Search Autocomplete",
+    "status": "in_progress",
+    "target_release": "2026-Q4",
+    "summary": "Implement typeahead search suggestions backed by the existing search index."
+  }
+]

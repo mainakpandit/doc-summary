@@ -8,9 +8,13 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.coverage
 
 # Node
 node_modules/
+
+# make dev process logs
+.logs/
 
 # Inbox is a watched runtime folder; never commit real corpus documents
 # dropped into it, but keep the directory itself tracked in git.

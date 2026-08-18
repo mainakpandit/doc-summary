@@ -1,0 +1,54 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 9 0 R >> >> /MediaBox [0 0 612 792] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 108 >>
+stream
+BT /F1 12 Tf 72 720 Td (Page one of the multi-page fixture used to test large PDF ingestion chunking.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 9 0 R >> >> /MediaBox [0 0 612 792] /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 1114 >>
+stream
+BT /F1 12 Tf 72 720 Td (Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua page two carries far more text than a single fifteen hundred character sliding window with two hundred characters of overlap can hold in one pass so the ingestion chunker under test must split this single page into multiple consecutive chunks while every one of those chunks still reports page number two back to the caller who reads them off of the parsed document that pypdf handed back after extracting this very sentence. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua page two keeps going for a while longer to comfortably clear the one thousand character mark with room to spare so the test is not fragile to small changes in how pypdf joins or trims whitespace when it extracts text from this content stream during the round trip that the ingestion tests exercise against this fixture file and a few more words are added here simply to push the total comfortably past one thousand.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 9 0 R >> >> /MediaBox [0 0 612 792] /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 117 >>
+stream
+BT /F1 12 Tf 72 720 Td (Page three wraps up the multi-page fixture with its own trailing page number metadata.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000253 00000 n 
+0000000412 00000 n 
+0000000538 00000 n 
+0000001704 00000 n 
+0000001830 00000 n 
+0000001998 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+2068
+%%EOF

@@ -1,0 +1,3 @@
+feature,status,owner,target_release,summary
+Checkout Redesign,in_progress,Alice Chen,2026-Q3,Rebuild the checkout flow on the new payments SDK
+Notifications Revamp,planned,,2026-Q4,Consolidate email and push notifications onto one delivery service

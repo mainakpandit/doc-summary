@@ -1,0 +1,3 @@
+Sprint Planning -- Notifications Revamp
+
+Discussed scope for the Notifications Revamp project. No owner has been assigned yet pending the reorg; targeting release 2026-Q4. Open risk raised: the team does not currently have a dedicated on-call rotation for the new delivery service, which is a gap before this can ship broadly.
